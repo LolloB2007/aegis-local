@@ -55,12 +55,13 @@ Aegis Local includes a **menu bar voice control app** that runs in the backgroun
 
 ### Features
 
-- **Global hotkey**: Press `Option+Control` to activate voice capture
-- **Visual overlay**: On-screen indicator shows recording status with 60-second countdown timer
+- **Global hotkey**: Press `Option+Space` (fallback for Option+Control compatibility) to activate voice capture
+- **Visual overlay**: On-screen indicator with blinking red light shows recording status
 - **Menu bar icon**: Persistent icon shows status and provides quick access
 - **Local transcription**: Uses Parakeet Ultra (same model as Hermes)
 - **No window needed**: Works from anywhere, even while using other apps
 - **Auto-start**: Launches at login via LaunchAgent
+- **Hidden from Dock**: Appears only as a menu bar icon, not a separate app
 
 ### Setup Voice Control
 
@@ -95,8 +96,8 @@ launchctl unload ~/Library/LaunchAgents/com.aegis.local.voicecontrol.plist
 
 1. Launch the app (or it auto-starts at login)
 2. Click the menu bar icon to see status
-3. Press `Option+Control` to start recording
-4. **Visual overlay appears**: An on-screen indicator with countdown timer shows recording is active
+3. Press `Option+Space` to start recording
+4. **Visual overlay appears**: A small indicator with blinking red light shows recording is active
 5. Speak your command (up to 60 seconds)
 6. Release the keys or wait for automatic processing
 7. The command is transcribed and sent to Aegis
@@ -202,3 +203,5 @@ No cloud dependencies. No token usage charges. No background agents running afte
 **Model switch error**: Confirm `ollama ps`, and verify that `Configure Ollama Memory.command` ran and Ollama was restarted. Disable "Reload Kev after generation" in settings to reduce handoff latency.
 
 **Voice Control issues**: See the Voice Control section above and `src/ui/voice-control/README.md` for detailed troubleshooting.
+
+**Hotkey not working**: The app tries `Option+Control` first, then falls back to `Option+Space`. If neither works, use the tray menu to activate recording.
