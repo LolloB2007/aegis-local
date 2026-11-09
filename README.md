@@ -192,6 +192,64 @@ Organize my desktop
 - `sort-names` - Alphabetize desktop items
 - `arrange-grid` - Set desktop to icon grid view
 
+### Tool Chaining System (v1.2.0)
+
+**Async LLM Parameter Generation:** System One can request content generation from the local LLM within the same tool call, without loading both models simultaneously.
+
+**Tool Call Format:**
+```json
+{
+  "tool": "tool-name",
+  "params": { "to": "john@example.com", "subject": "Meeting" },
+  "generate_from": "Write a professional email body for a meeting reminder"
+}
+```
+
+**How it works:**
+1. Kev (System One) receives command: "Send an email about tomorrow's meeting"
+2. Kev parses and recognizes need for `send-email` tool
+3. Kev requests LLM to generate email body via `/api/generate` (Kev unloaded)
+4. Local LLM generates content: "Hi there, just confirming our 2pm meeting tomorrow..."
+5. Kev executes tool with generated content
+6. **Both models never in RAM simultaneously**
+
+**Available Chaining Tools:**
+
+| Tool | Generates Content | Description |
+|------|-------------------|-------------|
+| `send-email` | ✅ Yes | Create and prepare email draft in Outlook |
+| `open-app` | ❌ No | Launch macOS application |
+| `quit-app` | ❌ No | Quit macOS application |
+| `sort-file` | ❌ No | Sort text file lines alphabetically |
+| `delete-file` | ❌ No | Delete file from filesystem |
+| `reorganize-desktop` | ❌ No | Clean or sort desktop items |
+| `transcribe` | ✅ Yes | Transcribe voice (self-referential) |
+
+**Complex Tool Chain Examples:**
+```
+"Send an email to Laura about the quarterly report with subject 'Q3 Results', asking her to review by Friday"
+→ Kev generates body → executes send-email with content
+
+"Sort my todos.txt file and put the most urgent tasks at the top"
+→ sort-file with order="desc" after LLM generates priority list
+
+"Reorganize my desktop to clean up and sort everything alphabetically"  
+→ reorganize-desktop with clean then sort actions
+```
+
+**Manual Tool Invocation (for testing):**
+```bash
+# Via voice control IPC
+curl -X POST http://localhost:3210/api/tool \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"open-app","params":{"app":"Microsoft Outlook"}}'
+```
+
+**Available IPC Handlers (v1.2.0):**
+- `execute-tool(toolDef)` - Execute any chaining tool
+- `generate-content(prompt)` - Generate text via local LLM
+- `list-tools()` - Return all available tools with categories
+
 ## How model switching works
 
 1. If the generator is still loaded, Aegis unloads it before asking Kev.
