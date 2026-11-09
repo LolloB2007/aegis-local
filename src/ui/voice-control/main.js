@@ -304,6 +304,72 @@ const toolHandlers = {
       default:
         return { success: false, error: `Unknown desktop action: ${action}` };
     }
+  },
+  
+  // --- Calendar Tools ---
+  'create-calendar-event': async (params) => {
+    const title = params.title || params.name;
+    const startDate = params.start || params.date;
+    const endDate = params.end || params.due;
+    const calendar = params.calendar || 'Home';
+    
+    if (!title) return { success: false, error: 'No event title specified' };
+    if (!startDate) return { success: false, error: 'No start date specified' };
+    
+    // Parse date - supports natural language dates
+    const script = `
+      tell application "Calendar"
+        tell calendar "${calendar}"
+          make new event with properties {summary:"${title}", start date:date "${startDate}"${endDate ? ', end date:date "' + endDate + '"' : ''}}
+        end tell
+        activate
+      end tell`;
+    
+    return await executeOsascript(script);
+  },
+  
+  'schedule-meeting': async (params) => {
+    const title = params.title || 'Meeting';
+    const participants = params.with || params.participants || '';
+    const when = params.when || params.time || 'today at 3pm';
+    const duration = params.duration || 1;
+    
+    if (!participants) return { success: false, error: 'No participants specified' };
+    
+    // Use LLM to generate calendar event description
+    const genPrompt = `Create a calendar event for a meeting titled "${title}" with ${participants}. 
+The meeting is ${when} and will last ${duration} hour(s). 
+Generate the iCal-like format with all details needed for Apple Calendar.`;
+    
+    const genResult = await generateLlmContent(genPrompt);
+    if (!genResult.success) {
+      return { success: false, error: `Failed to generate meeting details: ${genResult.error}` };
+    }
+    
+    // Parse LLM output and create event
+    return await toolHandlers['create-calendar-event']({
+      title,
+      start: when,
+      duration: `${duration} hour`,
+      notes: genResult.content
+    });
+  },
+  
+  'list-calendar-events': async (params) => {
+    const calendar = params.calendar || 'Home';
+    const days = parseInt(params.days) || 7;
+    const script = `
+      tell application "Calendar"
+        set startDate to (current date)
+        set endDate to startDate + (${days} * days)
+        set eventList to {}
+        tell calendar "${calendar}"
+          repeat with thisEvent in (every event whose start date ≥ startDate and start date ≤ endDate)
+            set end of eventList to {summary of thisEvent, start date of thisEvent, end date of thisEvent}
+          end repeat
+        end tell
+      end tell`;
+    return await executeOsascript(script);
   }
 };
 
@@ -545,6 +611,7 @@ ipcMain.handle('list-tools', async () => {
       email: ['send-email'],
       file: ['sort-file', 'delete-file'],
       desktop: ['reorganize-desktop'],
+      calendar: ['create-calendar-event', 'schedule-meeting', 'list-calendar-events'],
       other: ['transcribe']
     }
   };

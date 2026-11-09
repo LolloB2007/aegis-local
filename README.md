@@ -215,15 +215,30 @@ Organize my desktop
 
 **Available Chaining Tools:**
 
-| Tool | Generates Content | Description |
+|| Tool | Generates Content | Description |
 |------|-------------------|-------------|
-| `send-email` | ✅ Yes | Create and prepare email draft in Outlook |
+|| `send-email` | ✅ Yes | Create and prepare email draft in Outlook |
 | `open-app` | ❌ No | Launch macOS application |
 | `quit-app` | ❌ No | Quit macOS application |
 | `sort-file` | ❌ No | Sort text file lines alphabetically |
 | `delete-file` | ❌ No | Delete file from filesystem |
 | `reorganize-desktop` | ❌ No | Clean or sort desktop items |
+| `create-calendar-event` | ❌ No | Create event in Apple Calendar |
+| `schedule-meeting` | ✅ Yes | Schedule meeting with participants |
+| `list-calendar-events` | ❌ No | List upcoming calendar events |
 | `transcribe` | ✅ Yes | Transcribe voice (self-referential) |
+
+**Calendar Tool Examples:**
+```
+"Schedule a meeting with Laura about Q3 results tomorrow at 2pm for 1 hour"
+→ Kev generates meeting details → creates Apple Calendar event
+
+"Create an event called 'Team Standup' at 10am today"
+→ Creates calendar event in Apple Calendar
+
+"What's on my calendar this week?"
+→ List upcoming events from Apple Calendar
+```
 
 **Complex Tool Chain Examples:**
 ```
