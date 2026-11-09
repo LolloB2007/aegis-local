@@ -24,15 +24,16 @@ class AegisVoiceControl {
     this.tempDir = os.tmpdir();
     this.audioFile = null;
     this.overlayWindow = null;
-    this.mainWindow = null;
+    this.hotkeyRegistered = false;
+    this.hotkeyFormat = 'Opt+Ctrl';
   }
 
   createOverlayWindow() {
     if (this.overlayWindow) return;
     
     this.overlayWindow = new BrowserWindow({
-      width: 220,
-      height: 80,
+      width: 80,
+      height: 50,
       transparent: true,
       frame: false,
       alwaysOnTop: true,
@@ -53,18 +54,17 @@ class AegisVoiceControl {
     if (!this.overlayWindow) {
       this.createOverlayWindow();
     }
-    // Position at center of primary display
+    // Position at top-right of primary display
     const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
-    this.overlayWindow.setPosition(Math.floor((width - 220) / 2), Math.floor((height - 80) / 2));
+    // 10px margin from top and right
+    this.overlayWindow.setPosition(width - 80 - 10, 10);
     this.overlayWindow.show();
-    this.overlayWindow.webContents.send('start-timer');
   }
 
   hideOverlay() {
     if (this.overlayWindow) {
-      this.overlayWindow.webContents.send('stop-timer');
       this.overlayWindow.hide();
     }
   }
@@ -129,23 +129,49 @@ class AegisVoiceControl {
 
   registerHotkeys() {
     console.log('Registering global hotkey: Option+Control');
-    const success = globalShortcut.register('Option+Control', () => {
-      this.startRecording();
-    });
     
-    if (!success) {
-      console.error('Failed to register global hotkey');
+    // Electron 44.x accelerator format on macOS
+    // The accelerator parser expects specific formats
+    // Try Option+Control first (user's preference), then fallbacks
+    const formats = [
+      'Option+Control',   // User's requested format (may fail in Electron 44.x)
+      'Option+Space',     // Functional alternative
+      'Command+Option',   // Another variation
+      'Control+Option'    // Reversed order
+    ];
+    
+    let registered = false;
+    for (const format of formats) {
+      try {
+        const result = globalShortcut.register(format, () => {
+          this.startRecording();
+        });
+        if (result) {
+          console.log(`Hotkey registered successfully with format: ${format}`);
+          registered = true;
+          this.hotkeyFormat = format;
+          break;
+        }
+      } catch (err) {
+        console.error(`Format ${format} failed:`, err.message);
+      }
+    }
+    
+    if (!registered) {
+      console.error('Failed to register global hotkey with all formats');
+      this.hotkeyRegistered = false;
+      this.hotkeyFormat = 'Opt+Ctrl (tray menu only)';
+    } else {
+      this.hotkeyRegistered = true;
     }
   }
 
   async initialize() {
-    // Register IPC handlers first
+    // Register IPC handlers
     ipcMain.on('stop-recording', () => this.stopRecording());
-    ipcMain.on('recording-timeout', () => {
-      if (this.recording && this.audioProcess) {
-        this.audioProcess.kill();
-      }
-    });
+    
+    // Hide app from Dock
+    app.dock.hide();
     
     // Create tray icon
     const iconPath = path.join(__dirname, 'resources', 'aegis-icon.png');
@@ -160,7 +186,7 @@ class AegisVoiceControl {
       },
       { type: 'separator' },
       {
-        label: '🔊 Speak to Aegis (Opt+Ctrl)',
+        label: `🔊 Speak to Aegis (${this.hotkeyFormat || 'Opt+Ctrl'})`,
         enabled: !isAwake, // Disabled when sleeping
         click: () => this.startRecording()
       },
@@ -187,7 +213,7 @@ class AegisVoiceControl {
     // Setup sleep mode right-click
     this.setupSleepMode();
     
-    // Register hotkeys (unless already sleeping)
+    // Register hotkeys
     this.registerHotkeys();
   }
 
@@ -249,6 +275,7 @@ class AegisVoiceControl {
   }
 
   updateTrayMenu(state) {
+    const hotkeyLabel = this.hotkeyFormat || 'Opt+Ctrl';
     let label, enabled;
     
     if (state === 'sleep') {
@@ -258,7 +285,7 @@ class AegisVoiceControl {
       label = '🎙️ Recording...';
       enabled = false;
     } else {
-      label = isAwake ? '🔊 Speak to Aegis (Opt+Ctrl)' : '💤 Click to Wake Up';
+      label = isAwake ? `🔊 Speak to Aegis (${hotkeyLabel})` : '💤 Click to Wake Up';
       enabled = !isAwake;
     }
     
@@ -269,7 +296,7 @@ class AegisVoiceControl {
       },
       { type: 'separator' },
       {
-        label: state === true ? '⏹️ Stop Recording' : (isAwake ? '🔊 Speak to Aegis (Opt+Ctrl)' : '💤 Click to Wake Up'),
+        label: state === true ? '⏹️ Stop Recording' : (isAwake ? `🔊 Speak to Aegis (${hotkeyLabel})` : '💤 Click to Wake Up'),
         click: () => state ? this.stopRecording() : this.goAwake()
       },
       {
@@ -414,17 +441,8 @@ class AegisVoiceControl {
 const voiceControl = new AegisVoiceControl();
 
 app.whenReady().then(() => {
-  // Create minimal window (not shown)
-  const mainWindow = new BrowserWindow({
-    width: 1,
-    height: 1,
-    show: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-  voiceControl.mainWindow = mainWindow;
+  // Hide from dock early
+  app.dock.hide();
   
   voiceControl.initialize();
 });

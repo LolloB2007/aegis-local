@@ -3,9 +3,14 @@
 # This script launches the voice control as a background process
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-VOICE_DIR="$PROJECT_ROOT/src/ui/voice-control"
+# voice-control is at: project/src/ui/voice-control
+# Go up 3 levels to get project root
+PROJECT_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+VOICE_DIR="$SCRIPT_DIR"
 NODE_PATH="$VOICE_DIR/node_modules/.bin"
+
+echo "SCRIPT_DIR: $SCRIPT_DIR"
+echo "PROJECT_ROOT: $PROJECT_ROOT"
 
 # Change to the voice-control directory
 cd "$VOICE_DIR"

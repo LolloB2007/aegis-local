@@ -2,6 +2,7 @@
   "name": "aegis-voice-control",
   "version": "1.1.0",
   "description": "Menu bar app for voice control of Aegis Local",
+  "type": "module",
   "main": "main.js",
   "scripts": {
     "start": "electron main.js",
