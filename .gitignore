@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+src/ui/voice-control/node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
+Library/Logs/
+
+# macOS
+.DS_Store
+*.command
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env

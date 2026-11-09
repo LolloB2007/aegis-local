@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 220px;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.95);
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-radius: 10px;
+      backdrop-filter: blur(10px);
+      -webkit-app-region: no-drag;
+    }
+    #pulse {
+      width: 12px;
+      height: 12px;
+      background: #ff3b30;
+      border-radius: 50%;
+      animation: pulse 1.2s infinite;
+      box-shadow: 0 0 8px #ff3b30;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.2); }
+    }
+    #text {
+      flex: 1;
+      text-align: center;
+    }
+    #label {
+      font-weight: 500;
+      font-size: 13px;
+    }
+    #timer {
+      font-size: 18px;
+      font-weight: 600;
+      color: #ff9500;
+      margin-top: 2px;
+    }
+    #close {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.2);
+      cursor: pointer;
+      transition: background 0.2s;
+      -webkit-app-region: no-drag;
+    }
+    #close:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    #close::before {
+      content: '×';
+      color: white;
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="pulse"></div>
+  <div id="text">
+    <div id="label">Listening...</div>
+    <div id="timer">60</div>
+  </div>
+  <div id="close" title="Stop recording (click to release keys)"></div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    const timerEl = document.getElementById('timer');
+    const closeEl = document.getElementById('close');
+    
+    let remaining = 60;
+    let interval = null;
+    
+    function updateTimer() {
+      remaining--;
+      timerEl.textContent = remaining;
+      timerEl.style.color = remaining <= 10 ? '#ff3b30' : '#ff9500';
+      if (remaining <= 0) {
+        stopTimer();
+        ipcRenderer.send('recording-timeout');
+      }
+    }
+    
+    function startTimer() {
+      interval = setInterval(updateTimer, 1000);
+    }
+    
+    function stopTimer() {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    }
+    
+    closeEl.addEventListener('click', () => {
+      stopTimer();
+      ipcRenderer.send('stop-recording');
+    });
+    
+    ipcRenderer.on('start-timer', () => {
+      remaining = 60;
+      timerEl.textContent = remaining;
+      timerEl.style.color = '#ff9500';
+      startTimer();
+    });
+    
+    ipcRenderer.on('stop-timer', () => {
+      stopTimer();
+    });
+  </script>
+</body>
+</html>
