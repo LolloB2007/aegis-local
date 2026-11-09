@@ -2,7 +2,7 @@
 // Integrates with Aegis Local via HTTP API
 // Uses Option+Control hotkey for voice capture
 
-import { app, Tray, Menu, globalShortcut, ipcMain, BrowserWindow, screen, shell } from 'electron';
+import { app, Tray, Menu, globalShortcut, ipcMain, BrowserWindow, screen, shell, clipboard } from 'electron';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -32,14 +32,14 @@ class AegisVoiceControl {
     if (this.overlayWindow) return;
     
     this.overlayWindow = new BrowserWindow({
-      width: 80,
-      height: 50,
+      width: 340,
+      height: 220,
       transparent: true,
       frame: false,
       alwaysOnTop: true,
       skipTaskbar: true,
       resizable: false,
-      movable: false,
+      movable: true,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false
@@ -57,15 +57,33 @@ class AegisVoiceControl {
     // Position at top-right of primary display
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
-    // 10px margin from top and right
-    this.overlayWindow.setPosition(width - 80 - 10, 10);
+    // 10px margin from top and right - new position: width - windowWidth - 10
+    this.overlayWindow.setPosition(width - 340 - 10, 10);
     this.overlayWindow.show();
+    
+    // Notify overlay it's active
+    this.overlayWindow.webContents.send('recording-started');
   }
 
   hideOverlay() {
     if (this.overlayWindow) {
       this.overlayWindow.hide();
     }
+  }
+  
+  showOverlayWithText(text) {
+    if (!this.overlayWindow) {
+      this.createOverlayWindow();
+    }
+    // Position at top-right of primary display
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.workAreaSize;
+    // 10px margin from top and right
+    this.overlayWindow.setPosition(width - 340 - 10, 10);
+    this.overlayWindow.show();
+    
+    // Show the transcription text
+    this.overlayWindow.webContents.send('transcription-ready', text || '');
   }
 
   goAwake() {
@@ -172,6 +190,13 @@ class AegisVoiceControl {
   async initialize() {
     // Register IPC handlers
     ipcMain.on('stop-recording', () => this.stopRecording());
+    ipcMain.on('overlay-close', () => {
+      this.hideOverlay();
+      if (this.recording && this.audioProcess) {
+        this.audioProcess.kill();
+        this.recording = false;
+      }
+    });
     
     // Hide app from Dock
     app.dock.hide();
@@ -254,7 +279,7 @@ class AegisVoiceControl {
       }
       this.recording = false;
       this.updateTrayMenu(false);
-      this.hideOverlay();
+      // Don't hide here - processAudio shows the result in overlay
     });
     
     this.audioProcess.on('error', (err) => {
@@ -274,7 +299,8 @@ class AegisVoiceControl {
     }
     this.recording = false;
     this.updateTrayMenu(false);
-    this.hideOverlay();
+    // Show completion message in overlay
+    this.showOverlayWithText('Recording stopped');
   }
 
   updateTrayMenu(state) {
@@ -333,11 +359,17 @@ class AegisVoiceControl {
       if (transcript.success && transcript.text.trim()) {
         console.log('Transcription:', transcript.text);
         
+        // Show overlay with transcription text
+        this.showOverlayWithText(transcript.text);
+        
         // Send to Aegis Local
         await this.sendToAegis(transcript.text);
         
         // Clean up audio file
         fs.unlinkSync(this.audioFile);
+      } else {
+        // No text - just show completion
+        this.showOverlayWithText('');
       }
     } catch (err) {
       console.error('Processing error:', err);

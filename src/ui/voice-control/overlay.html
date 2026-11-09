@@ -5,41 +5,102 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 80px;
+      width: 340px;
+      min-width: 280px;
       background: rgba(0, 0, 0, 0.95);
       color: white;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 12px;
+      font-size: 14px;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 8px;
-      border-radius: 8px;
-      backdrop-filter: blur(8px);
+      gap: 12px;
+      padding: 16px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
       -webkit-app-region: no-drag;
     }
+    .pulse-container {
+      position: relative;
+      width: 12px;
+      height: 12px;
+    }
     #pulse {
-      width: 10px;
-      height: 10px;
+      position: absolute;
+      width: 12px;
+      height: 12px;
       background: #ff3b30;
       border-radius: 50%;
-      animation: pulse 1s infinite;
-      box-shadow: 0 0 6px #ff3b30;
+      animation: pulse 1.2s infinite;
+      box-shadow: 0 0 8px #ff3b30;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(1.3); }
+      50% { opacity: 0.4; transform: scale(1.4); }
     }
-    #label {
+    #status {
       font-weight: 500;
-      flex: 1;
-      text-align: left;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      text-align: center;
+      line-height: 1.4;
     }
-    #close {
-      width: 14px;
-      height: 14px;
+    #status.recording::before {
+      content: '● ';
+      color: #ff3b30;
+      margin-right: 4px;
+    }
+    .output-container {
+      width: 100%;
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 40px;
+      display: none;
+    }
+    #output-text {
+      color: #e0e0e0;
+    }
+    #output-text.copyable {
+      color: #4a90d9;
+      cursor: pointer;
+    }
+    #output-text.copyable:hover {
+      text-decoration: underline;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      -webkit-app-region: no-drag;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: #4a90d9;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #3a7bc8;
+    }
+    .btn-copy {
+      background: rgba(255,255,255,0.15);
+      color: white;
+    }
+    .btn-copy:hover {
+      background: rgba(255,255,255,0.25);
+    }
+    #close-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -47,15 +108,14 @@
       background: rgba(255,255,255,0.2);
       cursor: pointer;
       transition: background 0.2s;
-      -webkit-app-region: no-drag;
     }
-    #close:hover {
+    #close-btn:hover {
       background: rgba(255,255,255,0.3);
     }
-    #close::before {
+    #close-btn::before {
       content: '×';
       color: white;
-      font-size: 12px;
+      font-size: 14px;
       font-weight: bold;
       line-height: 1;
     }
@@ -63,22 +123,48 @@
 </head>
 <body>
   <div id="pulse"></div>
-  <div id="label">Listening...</div>
-  <div id="close" title="Stop recording"></div>
+  <div id="status">Listening...</div>
+  <div class="output-container">
+    <div id="output-text"></div>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" id="copy-btn">Copy</button>
+  </div>
   <script>
-    const { ipcRenderer } = require('electron');
-    const closeEl = document.getElementById('close');
+    const { ipcRenderer, clipboard } = require('electron');
     
-    closeEl.addEventListener('click', () => {
-      ipcRenderer.send('stop-recording');
+    const closeEl = document.getElementById('close-btn');
+    const copyBtn = document.getElementById('copy-btn');
+    let currentText = '';
+    
+    closeEl && closeEl.addEventListener('click', () => {
+      ipcRenderer.send('overlay-close');
     });
     
-    ipcRenderer.on('start-timer', () => {
-      // Just show listening state, no timer needed
+    copyBtn.addEventListener('click', () => {
+      if (currentText) {
+        clipboard.writeText(currentText);
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+      }
     });
     
-    ipcRenderer.on('stop-timer', () => {
-      // Timer stopped
+    ipcRenderer.on('recording-started', () => {
+      document.getElementById('status').textContent = 'Listening...';
+      document.getElementById('status').className = 'recording';
+      document.querySelector('.output-container').style.display = 'none';
+    });
+    
+    ipcRenderer.on('recording-stopped', () => {
+      document.getElementById('status').textContent = 'Recording complete';
+      document.getElementById('status').className = '';
+    });
+    
+    ipcRenderer.on('transcription-ready', (event, text) => {
+      currentText = text;
+      const outputEl = document.getElementById('output-text');
+      outputEl.textContent = text;
+      document.querySelector('.output-container').style.display = 'flex';
     });
   </script>
 </body>
