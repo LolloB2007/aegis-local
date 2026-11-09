@@ -2,7 +2,7 @@
 // Integrates with Aegis Local via HTTP API
 // Uses Option+Control hotkey for voice capture
 
-import { app, Tray, Menu, globalShortcut, ipcMain, BrowserWindow } from 'electron';
+import { app, Tray, Menu, globalShortcut, ipcMain, BrowserWindow, screen, shell } from 'electron';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -55,7 +55,6 @@ class AegisVoiceControl {
       this.createOverlayWindow();
     }
     // Position at top-right of primary display
-    const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
     // 10px margin from top and right
@@ -187,7 +186,7 @@ class AegisVoiceControl {
       { type: 'separator' },
       {
         label: `🔊 Speak to Aegis (${this.hotkeyFormat || 'Opt+Ctrl'})`,
-        enabled: !isAwake, // Disabled when sleeping
+        enabled: isAwake, // Enabled when awake, disabled when sleeping
         click: () => this.startRecording()
       },
       {
@@ -286,7 +285,7 @@ class AegisVoiceControl {
       enabled = false;
     } else {
       label = isAwake ? `🔊 Speak to Aegis (${hotkeyLabel})` : '💤 Click to Wake Up';
-      enabled = !isAwake;
+      enabled = isAwake;
     }
     
     const contextMenu = Menu.buildFromTemplate([
@@ -422,7 +421,6 @@ class AegisVoiceControl {
   }
 
   openConfig() {
-    const { shell } = require('electron');
     shell.openExternal(`${AEGIS_URL}/configuration`);
   }
 
