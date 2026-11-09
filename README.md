@@ -96,11 +96,11 @@ launchctl unload ~/Library/LaunchAgents/com.aegis.local.voicecontrol.plist
 
 1. Launch the app (or it auto-starts at login)
 2. Click the menu bar icon to see status
-3. Press `Option+Space` to start recording
-4. **Visual overlay appears**: A small indicator with blinking red light shows recording is active
-5. Speak your command (up to 60 seconds)
-6. Release the keys or wait for automatic processing
-7. The command is transcribed and sent to Aegis
+3. **Press and hold `Option+Space`**: A blinking red indicator shows recording is active (iPhone-sized 340px dashboard)
+4. Speak your command (up to 60 seconds)
+5. **Release the key**: Recording stops, transcribes via Parakeet, and shows results in dashboard
+6. **Click Copy** to copy the transcribed text (button only appears when text available)
+7. **Click Close (×)** or press Option+Space again to dismiss the dashboard
 
 ### Menu Actions
 
@@ -129,6 +129,38 @@ Click the tray icon anytime to toggle recording when awake.
 Allowlisted apps: Safari, Finder, Notes, Calendar, Reminders, Mail, Music, Photos, Terminal, Visual Studio Code, Obsidian, Google Chrome, System Settings, Preview.
 
 **Not yet supported:** sending mail or messages, computer vision, arbitrary mouse automation, persistent reminders outside Markdown notes, content indexing, shell execution, autonomous multistep GUI interactions, or arbitrary third-party integrations. The assistant will not pretend these actions were completed.
+
+### System One Model OSA Script Tools
+
+The System One model (`kev:0.8b-q8_0`) can execute **macOS AppleScript commands** for system-level actions. These are exposed as IPC handlers in the voice control app:
+
+| Command Pattern | AppleScript Executed |
+|-----------------|---------------------|
+| `open Microsoft Outlook` | `tell application "Microsoft Outlook" to launch` |
+| `open Slack` | `tell application "Slack" to launch` |
+| `quit Spotify` | `tell application "Spotify" to quit` |
+| `what apps are running?` | Lists visible apps via System Events |
+
+**Usage with Voice Control:**
+1. Speak: "Open Microsoft Outlook"
+2. The overlay dashboard will show the transcribed command
+3. Copy and paste into Aegis if needed, or press Option+Space to send via voice control
+4. System One model receives the command and executes via osascript
+
+**Manual IPC Usage (for scripting):**
+```bash
+# Direct osascript execution
+osascript -e 'tell application "Microsoft Outlook" to launch'
+
+# Via voice control IPC (when app running)
+# The System One model can call these handlers directly
+```
+
+**Available IPC Handlers:**
+- `osascript-execute(script: string)` - Execute any AppleScript
+- `system-open-app(appName: string)` - Launch an application
+- `system-quit-app(appName: string)` - Quit an application  
+- `system-get-apps()` - List currently running applications
 
 ## How model switching works
 
