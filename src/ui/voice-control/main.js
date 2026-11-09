@@ -143,7 +143,11 @@ class AegisVoiceControl {
     for (const format of formats) {
       try {
         const result = globalShortcut.register(format, () => {
-          this.startRecording();
+          if (this.recording) {
+            this.stopRecording();
+          } else {
+            this.startRecording();
+          }
         });
         if (result) {
           console.log(`Hotkey registered successfully with format: ${format}`);
