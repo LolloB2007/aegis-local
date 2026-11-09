@@ -319,6 +319,132 @@ ipcMain.handle('system-get-apps', async () => {
   return await ipcMain.handle('osascript-execute', null, script);
 });
 
+// --- File Operation Tools ---
+
+ipcMain.handle('file-move', async (event, sourcePath, destPath) => {
+  try {
+    // Escape paths for AppleScript
+    const src = sourcePath.replace(/"/g, '\\"');
+    const dst = destPath.replace(/"/g, '\\"');
+    const script = `tell application "Finder" to move file "${src}" to folder "${dst}"`;
+    const result = await ipcMain.handle('osascript-execute', null, script);
+    
+    if (result.success) {
+      // Also update via fs for immediate sync
+      fs.copyFileSync(sourcePath, destPath);
+      fs.unlinkSync(sourcePath);
+      return { success: true, message: `Moved ${sourcePath} to ${destPath}` };
+    }
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-copy', async (event, sourcePath, destPath) => {
+  try {
+    fs.copyFileSync(sourcePath, destPath);
+    return { success: true, message: `Copied ${sourcePath} to ${destPath}` };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-delete', async (event, filePath) => {
+  try {
+    const script = `tell application "Finder" to delete file "${filePath.replace(/"/g, '\\"')}"`;
+    const result = await ipcMain.handle('osascript-execute', null, script);
+    
+    if (result.success) {
+      fs.unlinkSync(filePath);
+      return { success: true, message: `Deleted ${filePath}` };
+    }
+    // Fallback to direct deletion
+    fs.unlinkSync(filePath);
+    return { success: true, message: `Deleted ${filePath}` };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-rename', async (event, filePath, newName) => {
+  try {
+    const dir = path.dirname(filePath);
+    const newPath = path.join(dir, newName);
+    fs.renameSync(filePath, newPath);
+    return { success: true, message: `Renamed to ${newName}` };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-read-text', async (event, filePath) => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, content };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-write-text', async (event, filePath, content) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true, message: `Wrote to ${filePath}` };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-list', async (event, dirPath) => {
+  try {
+    const files = fs.readdirSync(dirPath);
+    return { success: true, files };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('file-sort-text', async (event, filePath, order = 'asc') => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+    if (order === 'desc') lines.reverse();
+    lines.sort((a, b) => a.localeCompare(b));
+    fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+    return { success: true, message: `Sorted ${filePath} (${order})` };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('desktop-reorganize', async (event, action, params = {}) => {
+  try {
+    // Various desktop organization actions via AppleScript
+    switch (action) {
+      case 'clean':
+        // Move all desktop files to a folder
+        const script1 = `tell application "Finder" to move (every item of desktop) to folder "Desktop Cleanup" of desktop`;
+        return await ipcMain.handle('osascript-execute', null, script1);
+        
+      case 'sort-names':
+        // Sort desktop items by name
+        const script2 = `tell application "Finder" to sort desktop by name`;
+        return await ipcMain.handle('osascript-execute', null, script2);
+        
+      case 'arrange-grid':
+        // Arrange desktop items in grid
+        const script3 = `tell application "Finder" to set view of desktop to icon view`;
+        return await ipcMain.handle('osascript-execute', null, script3);
+        
+      default:
+        return { success: false, error: `Unknown desktop action: ${action}` };
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // --- Sleep/Wake ---
 
 function goSleep() {
