@@ -1,8 +1,8 @@
 // Aegis Voice Control - Background Process for macOS
-// Integrates with Aegis Local via HTTP API
-// Uses Option+Control hotkey for voice capture
+// HOLD MODE: Press and hold Option+Space to record, release to process
+// Uses 500ms debounce to detect key-up (press again within 500ms = release)
 
-import { app, Tray, Menu, globalShortcut, ipcMain, BrowserWindow, screen, shell, clipboard } from 'electron';
+import { app, Tray, Menu, globalShortcut, ipcMain, BrowserWindow, screen, shell } from 'electron';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -14,479 +14,383 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AEGIS_PORT = process.env.AEGIS_PORT || 3210;
 const AEGIS_URL = `http://127.0.0.1:${AEGIS_PORT}`;
 
-let isAwake = true;  // Track if the main process is active
+let isAwake = true;
+let recording = false;
+let audioProcess = null;
+let audioFile = null;
+let overlayWindow = null;
+let trayInstance = null;
+let hotkeyFormat = 'Option+Space';
+let lastKeyPressTime = 0;
+let keyUpTimer = null;
 
-class AegisVoiceControl {
-  constructor() {
-    this.tray = null;
-    this.audioProcess = null;
-    this.recording = false;
-    this.tempDir = os.tmpdir();
-    this.audioFile = null;
-    this.overlayWindow = null;
-    this.hotkeyRegistered = false;
-    this.hotkeyFormat = 'Opt+Ctrl';
-  }
+// --- Overlay Window ---
 
-  createOverlayWindow() {
-    if (this.overlayWindow) return;
-    
-    this.overlayWindow = new BrowserWindow({
-      width: 340,
-      height: 220,
-      transparent: true,
-      frame: false,
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      resizable: false,
-      movable: true,
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false
-      }
-    });
-    
-    const overlayPath = path.join(__dirname, 'overlay.html');
-    this.overlayWindow.loadFile(overlayPath);
-  }
-
-  showOverlay() {
-    if (!this.overlayWindow) {
-      this.createOverlayWindow();
-    }
-    // Position at top-right of primary display
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize;
-    // 10px margin from top and right - new position: width - windowWidth - 10
-    this.overlayWindow.setPosition(width - 340 - 10, 10);
-    this.overlayWindow.show();
-    
-    // Notify overlay it's active
-    this.overlayWindow.webContents.send('recording-started');
-  }
-
-  hideOverlay() {
-    if (this.overlayWindow) {
-      this.overlayWindow.hide();
-    }
-  }
+function createOverlayWindow() {
+  if (overlayWindow) return;
   
-  showOverlayWithText(text) {
-    if (!this.overlayWindow) {
-      this.createOverlayWindow();
+  overlayWindow = new BrowserWindow({
+    width: 340,
+    height: 220,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
     }
-    // Position at top-right of primary display
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize;
-    // 10px margin from top and right
-    this.overlayWindow.setPosition(width - 340 - 10, 10);
-    this.overlayWindow.show();
-    
-    // Show the transcription text
-    this.overlayWindow.webContents.send('transcription-ready', text || '');
-  }
+  });
+  
+  const overlayPath = path.join(__dirname, 'overlay.html');
+  overlayWindow.loadFile(overlayPath);
+}
 
-  goAwake() {
-    if (isAwake) return;
-    console.log('Waking up - re-enabling shortcuts');
-    isAwake = true;
-    this.registerHotkeys();
+function showOverlay() {
+  if (!overlayWindow) {
+    createOverlayWindow();
   }
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+  overlayWindow.setPosition(width - 340 - 10, 10);
+  overlayWindow.show();
+  overlayWindow.webContents.send('recording-started');
+}
 
-  goSleep() {
-    if (!isAwake) return;
-    console.log('Going to sleep - freeing RAM');
-    isAwake = false;
-    
-    // Kill audio process if recording
-    if (this.audioProcess) {
-      this.audioProcess.kill();
-      this.audioProcess = null;
-    }
-    
-    // Hide overlay
-    this.hideOverlay();
-    
-    // Unregister shortcuts
-    globalShortcut.unregisterAll();
-    
-    // Update tray menu
-    this.updateTrayMenu('sleep');
+function hideOverlay() {
+  if (keyUpTimer) {
+    clearTimeout(keyUpTimer);
+    keyUpTimer = null;
   }
-
-  setupSleepMode() {
-    // Right-click menu: sleep to free RAM, tray stays visible
-    this.tray.on('right-click', () => {
-      const sleepMenu = Menu.buildFromTemplate([
-        {
-          label: isAwake ? 'Sleep (Free RAM)' : 'Wake Up',
-          type: 'normal',
-          click: () => {
-            if (isAwake) {
-              // Free RAM but keep tray
-              this.goSleep();
-            } else {
-              // Wake up and re-enable
-              this.goAwake();
-            }
-          }
-        },
-        {
-          label: 'Quit (Close App)',
-          type: 'normal',
-          click: () => {
-            globalShortcut.unregisterAll();
-            app.quit();
-          }
-        }
-      ]);
-      this.tray.popUpContextMenu(sleepMenu);
-    });
-  }
-
-  registerHotkeys() {
-    console.log('Registering global hotkey: Option+Control');
-    
-    // Electron 44.x accelerator format on macOS
-    // The accelerator parser expects specific formats
-    // Try Option+Control first (user's preference), then fallbacks
-    const formats = [
-      'Option+Control',   // User's requested format (may fail in Electron 44.x)
-      'Option+Space',     // Functional alternative
-      'Command+Option',   // Another variation
-      'Control+Option'    // Reversed order
-    ];
-    
-    let registered = false;
-    for (const format of formats) {
-      try {
-        const result = globalShortcut.register(format, () => {
-          if (this.recording) {
-            this.stopRecording();
-          } else {
-            this.startRecording();
-          }
-        });
-        if (result) {
-          console.log(`Hotkey registered successfully with format: ${format}`);
-          registered = true;
-          this.hotkeyFormat = format;
-          break;
-        }
-      } catch (err) {
-        console.error(`Format ${format} failed:`, err.message);
-      }
-    }
-    
-    if (!registered) {
-      console.error('Failed to register global hotkey with all formats');
-      this.hotkeyRegistered = false;
-      this.hotkeyFormat = 'Opt+Ctrl (tray menu only)';
-    } else {
-      this.hotkeyRegistered = true;
-    }
-  }
-
-  async initialize() {
-    // Register IPC handlers
-    ipcMain.on('stop-recording', () => this.stopRecording());
-    ipcMain.on('overlay-close', () => {
-      this.hideOverlay();
-      if (this.recording && this.audioProcess) {
-        this.audioProcess.kill();
-        this.recording = false;
-      }
-    });
-    
-    // Hide app from Dock
-    app.dock.hide();
-    
-    // Create tray icon
-    const iconPath = path.join(__dirname, 'resources', 'aegis-icon.png');
-    
-    this.tray = new Tray(iconPath);
-    this.tray.setToolTip('Aegis Voice Control');
-    
-    const contextMenu = Menu.buildFromTemplate([
-      { 
-        label: isAwake ? 'Aegis Voice Control' : 'Awake - Click to Enable', 
-        enabled: false 
-      },
-      { type: 'separator' },
-      {
-        label: `🔊 Speak to Aegis (${this.hotkeyFormat || 'Opt+Ctrl'})`,
-        enabled: isAwake, // Enabled when awake, disabled when sleeping
-        click: () => this.startRecording()
-      },
-      {
-        label: isAwake ? '💤 Sleep (Free RAM)' : '🔆 Wake Up',
-        click: () => isAwake ? this.goSleep() : this.goAwake()
-      },
-      {
-        label: '⚙️ Configuration',
-        click: () => this.openConfig()
-      },
-      { type: 'separator' },
-      { 
-        label: '🔻 Quit', 
-        click: () => {
-          globalShortcut.unregisterAll();
-          app.quit(); 
-        }
-      }
-    ]);
-    
-    this.tray.setContextMenu(contextMenu);
-    
-    // Setup sleep mode right-click
-    this.setupSleepMode();
-    
-    // Register hotkeys
-    this.registerHotkeys();
-  }
-
-  async startRecording() {
-    if (!isAwake) return;
-    if (this.recording) return;
-    
-    console.log('Recording started...');
-    this.recording = true;
-    
-    // Update tray menu
-    this.updateTrayMenu(true);
-    
-    // Generate unique audio file path
-    const timestamp = Date.now();
-    this.audioFile = path.join(this.tempDir, `aegis_${timestamp}.wav`);
-    
-    // Use ffmpeg to record audio (avfoundation on macOS)
-    this.audioProcess = spawn('ffmpeg', [
-      '-f', 'avfoundation', // macOS audio device format
-      '-i', ':2',          // MacBook Air Microphone (default input)
-      '-t', '60',          // Max 60 seconds
-      '-y',                // Overwrite
-      '-ar', '16000',      // Sample rate for parakeet
-      '-ac', '1',          // Mono
-      this.audioFile
-    ], {
-      cwd: __dirname
-    });
-    
-    this.audioProcess.on('close', async (code) => {
-      if (code === 0 && this.audioFile) {
-        console.log('Recording finished, processing...');
-        await this.processAudio();
-      }
-      this.recording = false;
-      this.updateTrayMenu(false);
-      // Don't hide here - processAudio shows the result in overlay
-    });
-    
-    this.audioProcess.on('error', (err) => {
-      console.error('Recording error:', err);
-      this.recording = false;
-      this.updateTrayMenu(false);
-      this.hideOverlay();
-    });
-    
-    // Show visual overlay when recording starts
-    this.showOverlay();
-  }
-
-  async stopRecording() {
-    if (this.audioProcess) {
-      this.audioProcess.kill();
-    }
-    this.recording = false;
-    this.updateTrayMenu(false);
-    // Show completion message in overlay
-    this.showOverlayWithText('Recording stopped');
-  }
-
-  updateTrayMenu(state) {
-    const hotkeyLabel = this.hotkeyFormat || 'Opt+Ctrl';
-    let label, enabled;
-    
-    if (state === 'sleep') {
-      label = '💤 Slept';
-      enabled = false;
-    } else if (state === true) {
-      label = '🎙️ Recording...';
-      enabled = false;
-    } else {
-      label = isAwake ? `🔊 Speak to Aegis (${hotkeyLabel})` : '💤 Click to Wake Up';
-      enabled = isAwake;
-    }
-    
-    const contextMenu = Menu.buildFromTemplate([
-      { 
-        label, 
-        enabled: false 
-      },
-      { type: 'separator' },
-      {
-        label: state === true ? '⏹️ Stop Recording' : (isAwake ? `🔊 Speak to Aegis (${hotkeyLabel})` : '💤 Click to Wake Up'),
-        click: () => state ? this.stopRecording() : this.goAwake()
-      },
-      {
-        label: isAwake ? '💤 Sleep (Free RAM)' : '🔆 Wake Up',
-        click: () => isAwake ? this.goSleep() : this.goAwake()
-      },
-      {
-        label: '⚙️ Configuration',
-        click: () => this.openConfig()
-      },
-      { type: 'separator' },
-      { 
-        label: '🔻 Quit', 
-        click: () => {
-          globalShortcut.unregisterAll();
-          app.quit(); 
-        }
-      }
-    ]);
-    
-    this.tray.setContextMenu(contextMenu);
-  }
-
-  async processAudio() {
-    if (!this.audioFile || !fs.existsSync(this.audioFile)) return;
-    
-    try {
-      // Transcribe using parakeet-transcribe
-      const transcript = await this.transcribeAudio(this.audioFile);
-      
-      if (transcript.success && transcript.text.trim()) {
-        console.log('Transcription:', transcript.text);
-        
-        // Show overlay with transcription text
-        this.showOverlayWithText(transcript.text);
-        
-        // Send to Aegis Local
-        await this.sendToAegis(transcript.text);
-        
-        // Clean up audio file
-        fs.unlinkSync(this.audioFile);
-      } else {
-        // No text - just show completion
-        this.showOverlayWithText('');
-      }
-    } catch (err) {
-      console.error('Processing error:', err);
-    } finally {
-      this.audioFile = null;
-    }
-  }
-
-  async transcribeAudio(filePath) {
-    return new Promise((resolve) => {
-      // Use parakeet-transcribe (from Hermes setup)
-      const parakeetPath = '/Users/lorenzobarbagelata/.local/bin/parakeet-transcribe';
-      
-      if (fs.existsSync(parakeetPath)) {
-        const outputPath = path.join(this.tempDir, 'aegis_transcript.txt');
-        
-        const proc = spawn(parakeetPath, [
-          '--format', 'text',
-          '--output', outputPath,
-          filePath
-        ]);
-        
-        let stderr = '';
-        proc.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
-        
-        proc.on('close', (code) => {
-          if (code === 0 && fs.existsSync(outputPath)) {
-            const text = fs.readFileSync(outputPath, 'utf-8').trim();
-            fs.unlinkSync(outputPath);
-            resolve({ success: code === 0, text });
-          } else {
-            // Parakeet may return empty output for silence or errors
-            if (fs.existsSync(outputPath)) {
-              fs.unlinkSync(outputPath);
-            }
-            resolve({ success: true, text: '' });
-          }
-        });
-        
-        return;
-      }
-      
-      // Fallback: return empty transcript
-      resolve({ success: true, text: '' });
-    });
-  }
-
-  async sendToAegis(text) {
-    if (!text.trim()) return;
-    
-    const payload = JSON.stringify({ message: text });
-    
-    const options = {
-      hostname: '127.0.0.1',
-      port: AEGIS_PORT,
-      path: '/api/chat',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-        'X-Aegis-Local': '1'
-      }
-    };
-    
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          console.log('✓ Command executed:', text);
-        } else {
-          console.error('✗ Aegis API error:', res.statusCode);
-        }
-      });
-    });
-    
-    req.on('error', (err) => {
-      console.error('Failed to connect to Aegis:', err.message);
-    });
-    
-    req.write(payload);
-    req.end();
-  }
-
-  openConfig() {
-    shell.openExternal(`${AEGIS_URL}/configuration`);
-  }
-
-  cleanup() {
-    if (this.audioProcess) {
-      this.audioProcess.kill();
-    }
-    if (this.overlayWindow) {
-      this.overlayWindow.destroy();
-    }
-    globalShortcut.unregisterAll();
+  if (overlayWindow) {
+    overlayWindow.hide();
   }
 }
 
-// Main app setup
-const voiceControl = new AegisVoiceControl();
+function showOverlayWithText(text) {
+  if (!overlayWindow) {
+    createOverlayWindow();
+  }
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+  overlayWindow.setPosition(width - 340 - 10, 10);
+  overlayWindow.show();
+  overlayWindow.webContents.send('transcription-ready', text || '');
+}
+
+// --- Recording ---
+
+async function startRecording() {
+  if (!isAwake) return;
+  if (recording) {
+    // Already recording - this is likely a "key up" event (debounce)
+    // Stop recording
+    stopRecording();
+    return;
+  }
+  
+  // Check if this is a key-up simulation (pressed again quickly)
+  const now = Date.now();
+  if (now - lastKeyPressTime < 500) {
+    // Simulate key-up: stop any active recording
+    if (audioProcess) {
+      stopRecording();
+    }
+    return;
+  }
+  
+  lastKeyPressTime = now;
+  
+  console.log('Recording started...');
+  recording = true;
+  
+  const timestamp = Date.now();
+  audioFile = path.join(os.tmpdir(), `aegis_${timestamp}.wav`);
+  
+  audioProcess = spawn('ffmpeg', [
+    '-f', 'avfoundation',
+    '-i', ':2',
+    '-t', '60',
+    '-y',
+    '-ar', '16000',
+    '-ac', '1',
+    audioFile
+  ], { cwd: __dirname });
+  
+  audioProcess.on('close', async (code) => {
+    if (code === 0 && audioFile) {
+      console.log('Recording finished, processing...');
+      await processAudio();
+    }
+    recording = false;
+  });
+  
+  audioProcess.on('error', (err) => {
+    console.error('Recording error:', err);
+    recording = false;
+    hideOverlay();
+  });
+  
+  showOverlay();
+}
+
+async function stopRecording() {
+  if (audioProcess) {
+    audioProcess.kill('SIGTERM');
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  recording = false;
+}
+
+async function processAudio() {
+  if (!audioFile || !fs.existsSync(audioFile)) return;
+  
+  try {
+    const transcript = await transcribeAudio(audioFile);
+    
+    if (transcript.success && transcript.text.trim()) {
+      console.log('Transcription:', transcript.text);
+      showOverlayWithText(transcript.text);
+      await sendToAegis(transcript.text);
+      fs.unlinkSync(audioFile);
+    } else {
+      showOverlayWithText('');
+    }
+  } catch (err) {
+    console.error('Processing error:', err);
+  } finally {
+    audioFile = null;
+  }
+}
+
+async function transcribeAudio(filePath) {
+  return new Promise((resolve) => {
+    const parakeetPath = '/Users/lorenzobarbagelata/.local/bin/parakeet-transcribe';
+    
+    if (fs.existsSync(parakeetPath)) {
+      const outputPath = path.join(os.tmpdir(), 'aegis_transcript.txt');
+      const proc = spawn(parakeetPath, ['--format', 'text', '--output', outputPath, filePath]);
+      
+      proc.stderr.on('data', (data) => {});
+      
+      proc.on('close', (code) => {
+        if (code === 0 && fs.existsSync(outputPath)) {
+          const text = fs.readFileSync(outputPath, 'utf-8').trim();
+          fs.unlinkSync(outputPath);
+          resolve({ success: true, text });
+        } else {
+          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          resolve({ success: true, text: '' });
+        }
+      });
+    } else {
+      resolve({ success: true, text: '' });
+    }
+  });
+}
+
+async function sendToAegis(text) {
+  if (!text.trim()) return;
+  
+  const payload = JSON.stringify({ message: text });
+  const options = {
+    hostname: '127.0.0.1',
+    port: AEGIS_PORT,
+    path: '/api/chat',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+      'X-Aegis-Local': '1'
+    }
+  };
+  
+  const req = http.request(options, (res) => {
+    let data = '';
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      if (res.statusCode === 200) {
+        console.log('✓ Command executed:', text);
+      } else {
+        console.error('✗ Aegis API error:', res.statusCode);
+      }
+    });
+  });
+  
+  req.on('error', (err) => {
+    console.error('Failed to connect to Aegis:', err.message);
+  });
+  
+  req.write(payload);
+  req.end();
+}
+
+// --- Tray Menu ---
+
+function createTray() {
+  const { Tray } = require('electron');
+  const iconPath = path.join(__dirname, 'resources', 'aegis-icon.png');
+  
+  trayInstance = new Tray(iconPath);
+  trayInstance.setToolTip('Aegis Voice Control');
+  
+  trayInstance.on('right-click', () => {
+    const sleepMenu = Menu.buildFromTemplate([
+      {
+        label: isAwake ? 'Sleep (Free RAM)' : 'Wake Up',
+        type: 'normal',
+        click: () => isAwake ? goSleep() : goAwake()
+      },
+      {
+        label: 'Quit (Close App)',
+        type: 'normal',
+        click: () => app.quit()
+      }
+    ]);
+    trayInstance.popUpContextMenu(sleepMenu);
+  });
+  
+  updateTrayMenu();
+}
+
+function updateTrayMenu() {
+  if (!trayInstance) return;
+  
+  const contextMenu = Menu.buildFromTemplate([
+    { 
+      label: isAwake ? 'Aegis Voice Control' : 'Awake - Click to Enable', 
+      enabled: false 
+    },
+    { type: 'separator' },
+    {
+      label: isAwake ? `🔊 Speak to Aegis (${hotkeyFormat})` : '💤 Click to Wake Up',
+      enabled: isAwake,
+      click: () => startRecording()
+    },
+    {
+      label: isAwake ? '💤 Sleep (Free RAM)' : '🔆 Wake Up',
+      click: () => isAwake ? goSleep() : goAwake()
+    },
+    {
+      label: '⚙️ Configuration',
+      click: () => shell.openExternal(`${AEGIS_URL}/configuration`)
+    },
+    { type: 'separator' },
+    { 
+      label: '🔻 Quit', 
+      click: () => app.quit() 
+    }
+  ]);
+  
+  trayInstance.setContextMenu(contextMenu);
+}
+
+// --- OSA Script Tools ---
+
+ipcMain.handle('osascript-execute', async (event, script) => {
+  return new Promise((resolve) => {
+    const proc = spawn('/usr/bin/osascript', ['-e', script]);
+    let stdout = '';
+    let stderr = '';
+    
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    
+    proc.on('close', (code) => {
+      resolve({ success: code === 0, output: stdout.trim(), error: stderr.trim() });
+    });
+  });
+});
+
+ipcMain.handle('system-open-app', async (event, appName) => {
+  const script = `tell application "${appName}" to launch`;
+  return await ipcMain.handle('osascript-execute', event, script);
+});
+
+ipcMain.handle('system-quit-app', async (event, appName) => {
+  const script = `tell application "${appName}" to quit`;
+  return await ipcMain.handle('osascript-execute', event, script);
+});
+
+ipcMain.handle('system-get-apps', async () => {
+  const script = `tell application "System Events" to name of every process whose background is false`;
+  return await ipcMain.handle('osascript-execute', null, script);
+});
+
+// --- Sleep/Wake ---
+
+function goSleep() {
+  if (!isAwake) return;
+  console.log('Going to sleep - freeing RAM');
+  isAwake = false;
+  
+  if (audioProcess) {
+    audioProcess.kill();
+    audioProcess = null;
+  }
+  
+  hideOverlay();
+  globalShortcut.unregisterAll();
+  updateTrayMenu();
+}
+
+function goAwake() {
+  if (isAwake) return;
+  console.log('Waking up - re-enabling shortcuts');
+  isAwake = true;
+  registerHotkeys();
+  updateTrayMenu();
+}
+
+// --- Hotkey ---
+
+function registerHotkeys() {
+  console.log('Registering global hotkey: Option+Space');
+  
+  const result = globalShortcut.register('Option+Space', () => {
+    startRecording();
+  });
+  
+  if (result) {
+    console.log('Hotkey registered: Option+Space');
+    hotkeyFormat = 'Option+Space';
+  } else {
+    console.error('Failed to register hotkey');
+    hotkeyFormat = 'Unavailable';
+  }
+}
+
+// --- Overlay Close Handler ---
+
+ipcMain.on('overlay-close', () => {
+  hideOverlay();
+});
+
+ipcMain.on('stop-recording', () => {
+  stopRecording();
+});
+
+// --- Init ---
+
+function initialize() {
+  app.dock.hide();
+  createTray();
+  registerHotkeys();
+}
 
 app.whenReady().then(() => {
-  // Hide from dock early
-  app.dock.hide();
-  
-  voiceControl.initialize();
+  initialize();
 });
 
 app.on('before-quit', () => {
-  voiceControl.cleanup();
+  if (audioProcess) audioProcess.kill();
+  globalShortcut.unregisterAll();
 });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    voiceControl.initialize();
+    initialize();
   }
 });
