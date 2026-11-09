@@ -1,5 +1,7 @@
 # Aegis Local
 
+**Location:** `~/aegis-local` (moved from Desktop)
+
 A private, Mac-focused personal assistant using **two Ollama models**:
 
 - **System 1:** `kev:0.8b-q8_0`, using Ollama's native `/v1/systemone` decision endpoint.
@@ -102,7 +104,11 @@ launchctl unload ~/Library/LaunchAgents/com.aegis.local.voicecontrol.plist
 ### Menu Actions
 
 Right-click on the menu bar icon for:
-- **Quit (Free RAM)**: Exit the app to free up memory
+- **Sleep (Free RAM)**: Temporarily disables shortcuts and frees RAM while keeping the tray icon visible
+- **Wake Up**: Re-enable shortcuts and recording functionality
+- **Quit (Close App)**: Fully exit the application
+
+Click the tray icon anytime to toggle recording when awake.
 
 ## What it can actually do
 
