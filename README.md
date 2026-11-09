@@ -162,6 +162,36 @@ osascript -e 'tell application "Microsoft Outlook" to launch'
 - `system-quit-app(appName: string)` - Quit an application  
 - `system-get-apps()` - List currently running applications
 
+### File Operation Tools
+
+The System One model can perform file operations directly:
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `file-move` | `(sourcePath, destPath)` | Move file to destination folder |
+| `file-copy` | `(sourcePath, destPath)` | Copy file to destination |
+| `file-delete` | `(filePath)` | Delete a file |
+| `file-rename` | `(filePath, newName)` | Rename a file |
+| `file-read-text` | `(filePath)` | Read text file contents |
+| `file-write-text` | `(filePath, content)` | Write text to file |
+| `file-list` | `(dirPath)` | List directory contents |
+| `file-sort-text` | `(filePath, order)` | Sort lines alphabetically (asc/desc) |
+| `desktop-reorganize` | `(action, params)` | Clean desktop items |
+
+**File Operation Examples:**
+```
+Move "vacation photos" from Desktop to Documents
+Rename "draft.md" to "final.md"  
+Sort the "todo.txt" file alphabetically
+Delete the old "backup.zip" file
+Organize my desktop
+```
+
+**Desktop Reorganization Actions:**
+- `clean` - Move all desktop items to a "Desktop Cleanup" folder
+- `sort-names` - Alphabetize desktop items
+- `arrange-grid` - Set desktop to icon grid view
+
 ## How model switching works
 
 1. If the generator is still loaded, Aegis unloads it before asking Kev.
