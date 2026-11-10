@@ -48,9 +48,11 @@ export async function createNote(text, settings) {
   const dir = expandHome(settings.notesFolder);
   if (!inUserHome(dir)) throw new Error('Notes folder is outside your home directory.');
   await fs.mkdir(dir, { recursive: true });
+  const actualDir = await fs.realpath(dir);
+  if (!inUserHome(actualDir)) throw new Error('Notes directory points outside your home.');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const name = `${stamp} ${safeBasename(note.title)}.md`;
-  const file = path.join(dir, name);
+  const file = path.join(actualDir, name);
   await fs.writeFile(file, `# ${note.title.replace(/[\r\n#]/g, ' ')}\n\n${note.body}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
   return { text: `Saved **${note.title}** to your local notes.`, details: { path: file } };
 }
@@ -58,7 +60,9 @@ export async function createNote(text, settings) {
 export async function listNotes(settings) {
   const dir = expandHome(settings.notesFolder);
   try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const actualDir = await fs.realpath(dir);
+    if (!inUserHome(actualDir)) throw new Error('Notes directory points outside your home.');
+    const entries = await fs.readdir(actualDir, { withFileTypes: true });
     const files = entries.filter(e => e.isFile() && e.name.endsWith('.md')).sort((a,b) => b.name.localeCompare(a.name)).slice(0, 12);
     if (!files.length) return { text: 'No saved notes yet. Try `remember that ...`.' };
     return { text: `**Recent notes**\n${files.map(e => `• ${e.name.replace(/^\d{4}-.*?Z\s/, '')}`).join('\n')}`, details: { folder: dir, count: files.length } };
@@ -70,7 +74,15 @@ export async function findFiles(text, settings) {
   if (query.length < 2) return { text: 'What filename should I look for? Try `find files named statistics`.', needsInput: true };
   let scanned = 0;
   const found = [];
-  const roots = settings.searchRoots.map(expandHome).filter(inUserHome);
+  const roots = [];
+  for (const configured of settings.searchRoots) {
+    const root = expandHome(configured);
+    if (!inUserHome(root)) continue;
+    try {
+      const actual = await fs.realpath(root);
+      if (inUserHome(actual)) roots.push(actual);
+    } catch { /* inaccessible search root */ }
+  }
   const deadline = Date.now() + 2400;
   async function walk(folder, depth) {
     if (depth > 5 || scanned >= 7000 || found.length >= 16 || Date.now() > deadline) return;

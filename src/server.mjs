@@ -34,7 +34,14 @@ function securityCheck(req, port) {
   if (req.method === 'POST') {
     if (req.headers['x-aegis-local'] !== '1') throw Object.assign(new Error('Missing local-request header.'), { statusCode: 403 });
     const origin = req.headers.origin;
-    if (origin && !acceptedHosts.has(new URL(origin).host)) throw Object.assign(new Error('Cross-origin request rejected.'), { statusCode: 403 });
+    if (origin) {
+      let parsed;
+      try { parsed = new URL(origin); }
+      catch { throw Object.assign(new Error('Invalid Origin header.'), { statusCode: 403 }); }
+      if (parsed.protocol !== 'http:' || !acceptedHosts.has(parsed.host) || parsed.origin !== `http://${parsed.host}`) {
+        throw Object.assign(new Error('Cross-origin request rejected.'), { statusCode: 403 });
+      }
+    }
   }
 }
 
@@ -97,9 +104,12 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } =
         const target = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
         const resolved = path.resolve(publicDir, `.${target}`);
         if (!resolved.startsWith(publicDir + path.sep)) return send(res, 403, { error: 'Access denied.' });
-        const stat = await fs.stat(resolved).catch(() => null);
+        const actual = await fs.realpath(resolved).catch(() => null);
+        if (!actual) return send(res, 404, { error: 'Not found.' });
+        if (!actual.startsWith(publicDir + path.sep)) return send(res, 403, { error: 'Access denied.' });
+        const stat = await fs.stat(actual).catch(() => null);
         if (!stat?.isFile()) return send(res, 404, { error: 'Not found.' });
-        const contents = await fs.readFile(resolved);
+        const contents = await fs.readFile(actual);
         res.writeHead(200, {
           'content-type': types[path.extname(resolved)] || 'application/octet-stream',
           'content-length': contents.length,
