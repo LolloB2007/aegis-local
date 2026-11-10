@@ -5,6 +5,7 @@ import { openApp, openWebsite, webSearch, findFiles, createNote, listNotes, time
 import { explicitIntegrationIntent, PLANNED_ACTIONS, MUTATING_ACTIONS, validateIntegrationArgs, executeIntegration, confirmationSummary } from './integrations.mjs';
 import { planIntegration } from './tool-planner.mjs';
 import { stageApproval, takeApproval, cancelApproval } from './approvals.mjs';
+import { desktopIntent, DESKTOP_PLANNED, DESKTOP_MUTATIONS, DESKTOP_READ, validateDesktopArgs, executeDesktop, previewDesktop } from './desktop-tools.mjs';
 
 const SIDE_EFFECTS = new Set(['open_app', 'open_website', 'web_search', 'find_files', 'create_note', 'list_notes']);
 const EXECUTABLE = new Set([...SIDE_EFFECTS, 'get_time', 'help']);
@@ -52,8 +53,9 @@ export async function runTurn(input, hooks = {}) {
         output = { text: 'That approval code is invalid, expired, or already used.' };
         action = 'confirm_expired';
       } else {
-        const safeArgs = validateIntegrationArgs(pending.tool, pending.args, settings);
-        output = await executeIntegration(pending.tool, safeArgs, settings);
+        const isDesktop = DESKTOP_MUTATIONS.has(pending.tool);
+        const safeArgs = isDesktop ? validateDesktopArgs(pending.tool, pending.args) : validateIntegrationArgs(pending.tool, pending.args, settings);
+        output = isDesktop ? await executeDesktop(pending.tool, safeArgs, settings) : await executeIntegration(pending.tool, safeArgs, settings);
         action = pending.tool;
         emit('Human-confirmed action executed');
       }
@@ -77,7 +79,9 @@ export async function runTurn(input, hooks = {}) {
   }
 
   // New tools require a user-command grammar match, never Kev's guess alone.
-  const integrationIntent = explicitIntegrationIntent(text);
+  const integrationIntent = explicitIntegrationIntent(text) || desktopIntent(text);
+  const desktop = Boolean(integrationIntent && (DESKTOP_READ.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent)));
+  const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent));
   const route = integrationIntent
     ? { intent:integrationIntent, reason:'Explicit integration command verified', source:classification?'Kev + guardrail':'Command fallback' }
     : routeSafe(text, classification, settings.confidenceThreshold);
@@ -86,9 +90,9 @@ export async function runTurn(input, hooks = {}) {
   let modelMeta = null;
 
   if (integrationIntent) {
-    model = PLANNED_ACTIONS.has(integrationIntent) ? settings.llmModel : 'local';
+    model = needsPlanning ? settings.llmModel : 'local';
     let rawArgs = {};
-    if (PLANNED_ACTIONS.has(integrationIntent)) {
+    if (needsPlanning) {
       // Serialized asynchronous System One -> System Two handoff. On an 8 GB Mac
       // avoid two heavyweight models remaining resident simultaneously.
       if (settings.autoUnload) {
@@ -108,9 +112,18 @@ export async function runTurn(input, hooks = {}) {
       }
     }
     try {
-      const args = validateIntegrationArgs(integrationIntent, rawArgs, settings);
-      if (MUTATING_ACTIONS.has(integrationIntent)) {
-        const summary = confirmationSummary(integrationIntent, args);
+      let args = desktop
+        ? validateDesktopArgs(integrationIntent, rawArgs)
+        : validateIntegrationArgs(integrationIntent, rawArgs, settings);
+      if (MUTATING_ACTIONS.has(integrationIntent) || DESKTOP_MUTATIONS.has(integrationIntent)) {
+        let summary;
+        if (desktop) {
+          const preview = await previewDesktop(integrationIntent, args, settings);
+          args = preview.args;
+          summary = preview.summary;
+        } else {
+          summary = confirmationSummary(integrationIntent, args);
+        }
         const token = stageApproval(integrationIntent, args, summary);
         output = {
           text: `**Confirmation required**\n${summary}\n\nReply \`confirm ${token}\` to execute or \`cancel ${token}\` to discard. Expires in 5 minutes.`,
@@ -118,7 +131,9 @@ export async function runTurn(input, hooks = {}) {
         };
         emit('Awaiting human confirmation before changing macOS state');
       } else {
-        output = await executeIntegration(integrationIntent, args, settings);
+        output = desktop
+          ? await executeDesktop(integrationIntent, args, settings)
+          : await executeIntegration(integrationIntent, args, settings);
         emit(`${integrationIntent} executed through guarded tool registry`);
       }
     } catch (e) {
@@ -169,7 +184,7 @@ export async function runTurn(input, hooks = {}) {
       case 'create_note': output = await createNote(text, settings); break;
       case 'list_notes': output = await listNotes(settings); break;
       case 'get_time': output = timeResponse(); break;
-      case 'help': output = { text: helpText + '\n\nAdditional guarded tools: search/read/list Obsidian vault Markdown; list/create Apple Calendar events; create Reminders; read/write clipboard; check battery. Calendar, reminder and clipboard mutations always require a one-time confirmation code. Calendar and Reminders list names can be configured in settings.' }; break;
+      case 'help': output = { text: helpText + '\n\nAdditional guarded tools: read-only Obsidian vault search, Apple Calendar, Reminders, clipboard and battery, running apps, quit apps, Mail drafts/sending, safe file moves/Trash/batch organization, speaker volume, display brightness (optional CLI), network status, and fixed system diagnostics. Mutating actions require explicit confirmation. Calendar, reminder and clipboard mutations always require a one-time confirmation code. Calendar and Reminders list names can be configured in settings.' }; break;
       default: output = { text: 'I could not determine the requested action.' };
     }
     emit(`${route.intent} executed locally${output.needsInput ? ' (needs clarification)' : ''}`);
