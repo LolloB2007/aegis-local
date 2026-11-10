@@ -5,6 +5,7 @@ on:
     branches: [main, "feat/**"]
 permissions:
   contents: read
+  pull-requests: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -16,5 +17,17 @@ jobs:
       - name: Syntax-check core and voice
         run: |
           find src -type f \( -name '*.mjs' -o -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n1 node --check
-      - name: Run offline unit/integration tests with mocked Ollama
-        run: npm test
+      - name: Run tests and report failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if npm test > test-output.txt 2>&1; then
+            cat test-output.txt
+          else
+            cat test-output.txt
+            if [ "${{ github.event_name }}" = "push" ]; then
+              { echo 'CI diagnostic (temporary):'; echo '\`\`\`'; tail -n 120 test-output.txt; echo '\`\`\`'; } > test-report.md
+              gh pr comment 2 --body-file test-report.md || true
+            fi
+            exit 1
+          fi
