@@ -17,7 +17,10 @@ export const defaults = Object.freeze({
   contextTokens: 2048,
   historyCount: 12,
   searchRoots: ['~/Documents', '~/Desktop', '~/Downloads'],
-  notesFolder: '~/Documents/Aegis Notes'
+  notesFolder: '~/Documents/Aegis Notes',
+  vaultRoot: '~/Documents/Obsidian/claude',
+  calendarName: '',
+  reminderListName: ''
 });
 
 export const expandHome = value => typeof value === 'string'
@@ -57,6 +60,15 @@ export function validateSettings(raw) {
   }
   if (typeof v.notesFolder !== 'string' || !inUserHome(v.notesFolder)) {
     throw new Error('Notes folder must be inside your home folder.');
+  }
+  if (typeof v.vaultRoot !== 'string' || !inUserHome(v.vaultRoot)) {
+    throw new Error('Vault folder must be inside your home directory.');
+  }
+  for (const key of ['calendarName', 'reminderListName']) {
+    if (typeof v[key] !== 'string' || v[key].length > 100 || [...v[key]].some(ch => ch.charCodeAt(0) < 32)) {
+      throw new Error(`Invalid ${key}. Use an exact macOS calendar or Reminders list name.`);
+    }
+    v[key] = v[key].trim();
   }
   return v;
 }

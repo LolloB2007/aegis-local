@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; object-src 'none'">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -136,66 +137,48 @@
     <div id="output-text"></div>
   </div>
   <div class="actions">
+    <button class="btn btn-primary" id="stop-btn">Stop recording</button>
     <button class="btn btn-copy show" id="copy-btn">Copy</button>
   </div>
   <script>
-    const { ipcRenderer, clipboard } = require('electron');
-    
-    const closeEl = document.getElementById('close-btn');
+    const bridge = window.aegisOverlay;
     const copyBtn = document.getElementById('copy-btn');
+    const stopBtn = document.getElementById('stop-btn');
     const outputEl = document.getElementById('output-text');
     const statusEl = document.getElementById('status');
     let currentText = '';
-    
-    closeEl && closeEl.addEventListener('click', () => {
-      ipcRenderer.send('overlay-close');
-    });
-    
+    stopBtn.addEventListener('click', () => bridge.stop());
     copyBtn.addEventListener('click', () => {
-      if (currentText && currentText.trim()) {
-        clipboard.writeText(currentText);
+      if (currentText.trim()) {
+        bridge.copy(currentText);
         copyBtn.textContent = 'Copied!';
         setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
       }
     });
-    
-    ipcRenderer.on('recording-started', () => {
+    bridge.on('recording-started', () => {
       statusEl.textContent = 'Listening...';
       statusEl.className = 'recording';
       outputEl.style.display = 'none';
       copyBtn.classList.remove('show');
+      stopBtn.style.display = 'inline-block';
       currentText = '';
     });
-    
-    ipcRenderer.on('recording-stopped', () => {
+    bridge.on('recording-stopped', () => {
       statusEl.textContent = 'Processing...';
       statusEl.className = '';
+      stopBtn.style.display = 'none';
     });
-    
-    ipcRenderer.on('transcription-ready', (event, text) => {
-      currentText = text || '';
-      outputEl.textContent = text || '';
-      
-      if (text && text.trim()) {
-        // Show output with text available for copy
-        outputEl.style.display = 'block';
-        outputEl.className = 'copyable';
-        copyBtn.classList.add('show');
-        statusEl.textContent = 'Done';
-        statusEl.className = 'done';
-      } else {
-        // No text - hide copy button
-        outputEl.style.display = 'none';
-        copyBtn.classList.remove('show');
-        statusEl.textContent = 'No speech detected';
-        statusEl.className = '';
-      }
+    bridge.on('transcription-ready', text => {
+      currentText = String(text || '');
+      outputEl.textContent = currentText;
+      const present = Boolean(currentText.trim());
+      outputEl.style.display = present ? 'block' : 'none';
+      copyBtn.classList.toggle('show', present);
+      stopBtn.style.display = 'none';
+      statusEl.textContent = present ? 'Done' : 'No speech detected';
+      statusEl.className = present ? 'done' : '';
     });
-    
-    ipcRenderer.on('close-overlay', () => {
-      // Close overlay when Option+Space pressed again
-      ipcRenderer.send('overlay-close');
-    });
+    bridge.on('close-overlay', () => bridge.close());
   </script>
 </body>
 </html>

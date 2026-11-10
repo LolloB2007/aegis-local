@@ -118,6 +118,11 @@
         <div class="form-section-label">LOCAL FILES <span>03</span></div>
         <div class="field"><label for="notes-folder">Notes folder</label><input id="notes-folder" type="text" spellcheck="false" /><small>Must be inside your home directory.</small></div>
         <div class="field"><label for="search-roots">File search folders (one per line)</label><textarea id="search-roots" rows="3" spellcheck="false"></textarea></div>
+        <div class="field"><label for="vault-root">Obsidian vault folder</label><input id="vault-root" type="text" spellcheck="false" /><small>Default: ~/Documents/Obsidian/claude. Read-only vault tools.</small></div>
+        <div class="form-section-label">MACOS INTEGRATIONS <span>04</span></div>
+        <div class="field"><label for="calendar-name">Calendar name</label><input id="calendar-name" type="text" spellcheck="false" /><small>Exact writable Apple Calendar name for newly created events.</small></div>
+        <div class="field"><label for="reminder-list-name">Reminders list name</label><input id="reminder-list-name" type="text" spellcheck="false" /><small>Exact Apple Reminders list name for new reminders.</small></div>
+        <small>Any calendar, reminder or clipboard change requires confirmation before execution.</small>
         <div class="modal-actions"><button type="button" class="secondary-button" id="cancel-settings">Cancel</button><button type="submit" class="primary-button" id="save-settings">Save configuration <svg><use href="#i-arrow"/></svg></button></div>
       </form>
     </div>

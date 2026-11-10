@@ -44,6 +44,26 @@ function addMessage(message) {
   el.className = `message ${isUser ? 'user' : 'assistant'}`;
   const tag = message.action ? escapeHtml(message.action.replace(/_/g, ' ').toUpperCase()) : (isUser ? 'COMMAND' : 'RESPONSE');
   el.innerHTML = `<div class="message-avatar">${isUser ? 'U' : 'Λ'}</div><div class="message-body"><div class="message-meta"><strong>${isUser ? 'You' : 'Aegis'}</strong><span class="message-mode">${tag}</span><span class="message-timestamp">${friendlyTime(message.at)}</span></div><div class="message-content">${richText(message.content)}</div>${message.elapsedMs ? `<div class="message-trace"><span><svg><use href="#i-check"/></svg> ${formatDuration(message.elapsedMs)} total</span><span>${escapeHtml(message.model || 'local')}</span>${message.probability != null ? `<span>Kev choice ${Math.round(message.probability * 100)}%</span>` : ''}</div>` : ''}</div>`;
+  if (!isUser && /^[a-f0-9]{12}$/i.test(message.confirmationToken || '')) {
+    const controls = document.createElement('div');
+    controls.className = 'message-confirmation';
+    const yes = document.createElement('button');
+    const no = document.createElement('button');
+    yes.textContent = 'Confirm action';
+    no.textContent = 'Cancel';
+    yes.className = 'primary-button';
+    no.className = 'secondary-button';
+    const token = message.confirmationToken;
+    const choose = action => {
+      yes.disabled = true;
+      no.disabled = true;
+      sendCommand(action + ' ' + token);
+    };
+    yes.addEventListener('click', () => choose('confirm'));
+    no.addEventListener('click', () => choose('cancel'));
+    controls.append(yes, no);
+    el.querySelector('.message-body').append(controls);
+  }
   ui.history.append(el);
   scrollToBottom();
 }
@@ -83,7 +103,7 @@ async function sendCommand(text) {
     const response = await api('/api/chat', { message: command });
     messages.push({ role: 'user', content: command });
     messages.push({ role: 'assistant', content: response.response });
-    addMessage({ role: 'assistant', content: response.response, action: response.action, model: response.model, elapsedMs: response.elapsedMs, probability: response.classification?.probability, at: new Date().toISOString() });
+    addMessage({ role: 'assistant', content: response.response, action: response.action, model: response.model, elapsedMs: response.elapsedMs, probability: response.classification?.probability, confirmationToken: response.details?.confirmationToken, at: new Date().toISOString() });
     updateTrace(response);
     if (response.warning) toast(`Kev warning: ${response.warning}`, true);
     await refreshStatus();
@@ -157,6 +177,9 @@ function fillSettings() {
   $('threshold').value = settings.confidenceThreshold;
   $('notes-folder').value = settings.notesFolder;
   $('search-roots').value = settings.searchRoots.join('\n');
+  $('vault-root').value = settings.vaultRoot || '~/Documents/Obsidian/claude';
+  $('calendar-name').value = settings.calendarName || '';
+  $('reminder-list-name').value = settings.reminderListName || '';
 }
 function openSettings() {
   fillSettings();
@@ -191,6 +214,9 @@ $('settings-form').addEventListener('submit', async event => {
     autoReloadKev: $('auto-reload').checked,
     contextTokens: Number($('context-tokens').value), confidenceThreshold: Number($('threshold').value),
     notesFolder: $('notes-folder').value.trim(),
+    vaultRoot: $('vault-root').value.trim(),
+    calendarName: $('calendar-name').value.trim(),
+    reminderListName: $('reminder-list-name').value.trim(),
     searchRoots: $('search-roots').value.split('\n').map(x => x.trim()).filter(Boolean)
   };
   $('save-settings').disabled = true;
