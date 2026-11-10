@@ -65,7 +65,7 @@ export function validateSettings(raw) {
     throw new Error('Vault folder must be inside your home directory.');
   }
   for (const key of ['calendarName', 'reminderListName']) {
-    if (typeof v[key] !== 'string' || v[key].length > 100 || /[\\r\\n\\u0000]/.test(v[key])) {
+    if (typeof v[key] !== 'string' || v[key].length > 100 || [...v[key]].some(ch => ch.charCodeAt(0) < 32)) {
       throw new Error(`Invalid ${key}. Use an exact macOS calendar or Reminders list name.`);
     }
     v[key] = v[key].trim();
