@@ -24,7 +24,12 @@ export function stockQuoteIntent(message) {
   const isStock=/\b(?:stock|shares?|ticker|quote|trading at)\b/i.test(text);
   const explicit=/\$[A-Z]{1,7}\b|\b(?:NASDAQ|NYSE|NYSEARCA|BIT):[A-Z0-9.-]+\b/.test(text);
   const capitalSymbol=/\b[A-Z]{1,7}(?:\.[A-Z]{1,3})?\b/.test(text);
-  if(!isStock && !(explicit||capitalSymbol))return null;
+  // Known listed-company names plus a clear price request should be answered
+  // as quotes even when the user omits the word "stock" (e.g. "look up
+  // Apple's price"), rather than triggering a browser-only search.
+  const knownCompany=NAMES.some(([name])=>
+    new RegExp('(?:^|[^a-z])'+name+'(?:$|[^a-z])','i').test(text));
+  if(!isStock && !(explicit||capitalSymbol||knownCompany))return null;
   if(!/\b(?:what|how much|latest|current|today|now|give|show|check|tell|quote|price)\b/i.test(text))return null;
   const candidates=new Set();
   for(const match of text.matchAll(/(?:\$|\b(?:NASDAQ|NYSE|NYSEARCA|BIT):)([A-Z][A-Z0-9.-]{0,14})\b/g))candidates.add(match[1]);

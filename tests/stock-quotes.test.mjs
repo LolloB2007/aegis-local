@@ -45,7 +45,7 @@ test('reject mismatched, stale, invalid, and rate-limited quotes',async()=>{
 });
 
 
-test('end-to-end: Kev says ask_llm, but market question uses verified quote without generator',async t=>{
+test('end-to-end: stock question bypasses BOTH models and returns verified quote',async t=>{
   const fs=await import('node:fs/promises');
   const os=await import('node:os');
   const path=await import('node:path');
@@ -93,6 +93,6 @@ test('end-to-end: Kev says ask_llm, but market question uses verified quote with
   assert.match(response.response,/250\.25 USD/);
   assert.match(response.response,/Market timestamp/);
   assert.doesNotMatch(response.response,/look it up/i);
-  assert.ok(mockCalls.includes('/v1/systemone'),'Kev was consulted for classification');
+  assert.ok(!mockCalls.includes('/v1/systemone'),'Quote reads must not load Kev');
   assert.ok(!mockCalls.includes('/api/chat'),'The 3B must not generate a market quote');
 });

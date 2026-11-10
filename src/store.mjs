@@ -12,7 +12,9 @@ export const defaults = Object.freeze({
   llmModel: 'llama3.2:3b',
   ollamaUrl: 'http://127.0.0.1:11434',
   autoUnload: true,
-  autoReloadKev: true,
+  // Keep models off between turns on 8 GB Macs. Explicitly opting out of
+  // autoUnload can still opt in to resident Kev for faster repeated prompts.
+  autoReloadKev: false,
   confidenceThreshold: 0.55,
   contextTokens: 2048,
   historyCount: 12,

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getSettings, saveSettings, getHistory, clearHistory } from './store.mjs';
 import { getOllamaStatus, unloadModel, warmKev } from './ollama.mjs';
 import { runTurn } from './agent.mjs';
+import { createModelScheduler } from './model-lifecycle.mjs';
 import { initializeStartupContext, getStartupContext } from './startup-context.mjs';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -51,35 +52,14 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210, st
   const readiness = (startup || (async()=>initializeStartupContext(await getSettings()))())
     .then(value=>({ok:true,context:value}))
     .catch(e=>({ok:false,error:e.message}));
-  let work = Promise.resolve();
-  let activeJobs = 0;
-  let lastWorkAt = Date.now();
-  let lastIdleSweep = 0;
-  const IDLE_MODEL_UNLOAD_MS = 120000; // the menu stays resident, not the LLMs
-
-  const enqueue = job => {
-    const next = work.then(async () => {
-      activeJobs++;
-      try { return await job(); }
-      finally { activeJobs--; lastWorkAt = Date.now(); }
-    });
-    work = next.catch(() => undefined);
-    return next;
-  };
-  const idleTimer = setInterval(() => {
-    const now = Date.now();
-    if (activeJobs || now-lastWorkAt < IDLE_MODEL_UNLOAD_MS || now-lastIdleSweep < IDLE_MODEL_UNLOAD_MS) return;
-    lastIdleSweep = now;
-    enqueue(async () => {
-      if (Date.now()-lastWorkAt < IDLE_MODEL_UNLOAD_MS) return; // user activity queued since the sweep was scheduled
-      const settings = await getSettings();
-      for (const [name,type] of [[settings.llmModel,'generator'],[settings.kevModel,'decision']]) {
-        try { await unloadModel(settings,name,type); }
-        catch(error) { console.warn('[aegis] idle unload:',error.message); }
-      }
-    }).catch(error=>console.warn('[aegis] idle sweep:',error.message));
-  },30000);
-  idleTimer.unref();
+  // Offload the Aegis models after EACH completed/failed request, not two
+  // minutes later. The scheduler serializes requests with model cleanup.
+  const lifecycle = createModelScheduler({
+    readSettings:getSettings,
+    unload:unloadModel,
+    report:message=>console.warn('[aegis] '+message)
+  });
+  const enqueue = lifecycle.enqueue;
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -212,7 +192,7 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210, st
       else res.end();
     }
   });
-  server.on('close', () => clearInterval(idleTimer));
+  server.on('close', () => lifecycle.close());
   return server;
 }
 

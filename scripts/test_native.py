@@ -33,6 +33,11 @@ class SourceCompatibilityTests(unittest.TestCase):
                          "<alt>+<shift>+<esc>"):
             self.assertIn(shortcut, content)
         self.assertNotIn("import electron", content.lower())
+        self.assertIn("def _watch_hotkeys", content)
+        self.assertIn("self.hotkeys.is_alive()", content)
+        self.assertIn("restartHotkeys:", content)
+        self.assertIn("def _pump_events", content)
+        self.assertIn("traceback.print_exc()", content)
 
     def test_selected_text_returns_safely_without_quartz_on_linux(self):
         if sys.platform != "darwin":
