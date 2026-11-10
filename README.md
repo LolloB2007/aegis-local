@@ -4,6 +4,17 @@ Local-first macOS assistant for an M1 MacBook Air with **8 GB RAM**. **No Electr
 
 > **Release-candidate status:** The native panel, global hotkeys, microphone access, Accessibility permissions, fullscreen Spaces, and LaunchAgent startup must be verified on the target Mac. Passing CI does not prove fullscreen or microphone behavior. See [RC verification checklist](docs/RELEASE_CANDIDATE_CHECKLIST.md).
 
+## Verified stock quotes (read-only)
+
+Ask `What's Apple's stock price?`, `What is the price of NVDA?`, or
+`How much is UniCredit stock worth?`. Kev still classifies intent, but a
+deterministic HTTPS read of Yahoo Finance chart metadata obtains the numeric
+price, currency, market timestamp, and source. The 3B cannot hallucinate a
+price or claim it searched the web. Quotes may be delayed; unknown companies
+require an explicit ticker, and provider failures are reported rather than
+guessed. Generic `search the web for ...` still opens a browser and does
+not feed its page contents into the LLM.
+
 ## v2.2 RC: macOS integrations, vault access gate, 3B context compaction
 
 - **WhatsApp** and **Opera GX** are added to the fixed app-launch/quit allowlist. Aegis does not send WhatsApp messages or read WhatsApp conversations.
@@ -165,6 +176,38 @@ First run the native controller interactively:
 ```
 
 Look for the **Λ** menu-bar icon. There should be no panel while idle. Test the quick-text shortcut, fullscreen overlay, then voice and approvals. The v2 RC uses a Python venv; packaging into a signed `.app` bundle is recommended for stable long-term macOS Accessibility/TCC permissions but is not validated here.
+
+### Build and install Aegis.app (recommended on macOS)
+
+Aegis now records microphone audio through **AVAudioRecorder inside Aegis.app**
+by default. This allows macOS microphone permission to apply directly to the
+packaged process and uses the system's selected microphone, not FFmpeg's
+ambiguous `:0` audio index. Audio peak/RMS levels are checked before invoking
+Parakeet, and failures are visible in the panel and native log. Recordings
+and transcripts are deleted after processing. The optional legacy FFmpeg
+fallback uses `AEGIS_MIC_BACKEND=ffmpeg` and `AEGIS_AUDIO_DEVICE=:N`.
+
+From a clean local checkout with a Python virtual environment:
+
+```bash
+.venv/bin/python -m pip install -r requirements-native.txt
+.venv/bin/python -m pip install pyinstaller
+.venv/bin/python scripts/build-macos-app.py
+ditto dist/Aegis.app /Applications/Aegis.app
+.venv/bin/python scripts/install-launchagents.py install --with-app
+.venv/bin/python scripts/install-launchagents.py status
+```
+
+This installs the **packaged app executable**, not the venv interpreter, plus
+the existing guarded Node service. Allow microphone access to **Aegis** in
+macOS Settings when prompted. There is no supported command to force a TCC
+microphone grant. If capture fails, inspect
+`~/.aegis-local/logs/native.log` for `Audio diagnostic: ... peak=... RMS=...`
+and review the panel's explicit `Voice error`.
+
+The app is ad-hoc signed for local testing only; developer signing and
+notarization are required for distribution. It does **not** bundle Ollama,
+Node.js, or Parakeet, so they must be installed separately.
 
 ### Start at every login: two per-user LaunchAgents
 

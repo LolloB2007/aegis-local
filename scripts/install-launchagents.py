@@ -23,6 +23,7 @@ AGENTS = Path.home() / "Library/LaunchAgents"
 LOGS = Path.home() / ".aegis-local/logs"
 VOICE_FILE = ROOT / "src/ui/voice-control/headless_voice.py"
 NATIVE_FILE = ROOT / "src/ui/native/app.py"
+APP_EXECUTABLE = Path("/Applications/Aegis.app/Contents/MacOS/Aegis")
 ENV_PATH = ":".join(filter(None, [
     str(Path.home() / ".local/bin"),
     "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
@@ -59,6 +60,7 @@ def make_plist(label: str, command: list[str], *, voice: bool = False, native: b
             "AEGIS_ROOT": str(ROOT),
             "AEGIS_PORT": os.environ.get("AEGIS_PORT", "3210"),
             "AEGIS_AUDIO_DEVICE": os.environ.get("AEGIS_AUDIO_DEVICE", ":0"),
+            "AEGIS_MIC_BACKEND": os.environ.get("AEGIS_MIC_BACKEND", "native" if native else "ffmpeg"),
             "PARAKEET_TRANSCRIBE": os.environ.get("PARAKEET_TRANSCRIBE", str(Path.home() / ".local/bin/parakeet-transcribe")),
         },
         "RunAtLoad": True,
@@ -142,28 +144,36 @@ def retire_other(label: str) -> None:
         print(f"Disabled previous service {label}; original plist backed up to {backup}")
 
 
-def install(with_voice: bool, with_native: bool = False) -> None:
+def install(with_voice: bool, with_native: bool = False, with_app: bool = False) -> None:
     node = shutil.which("node", path=ENV_PATH)
     if not node:
         raise RuntimeError("Cannot locate Node.js. Install Node 20+ and try again.")
-    if with_native and with_voice:
-        raise RuntimeError("Choose one voice controller: --with-native OR --with-voice.")
-    if with_native:
+    if sum((bool(with_native), bool(with_voice), bool(with_app))) > 1:
+        raise RuntimeError("Choose exactly one voice controller: --with-native, --with-voice or --with-app.")
+    if with_app:
+        if not APP_EXECUTABLE.is_file() or not os.access(APP_EXECUTABLE, os.X_OK):
+            raise RuntimeError("No executable Aegis.app in /Applications. Build and copy the app first.")
+        tr = Path(os.environ.get("PARAKEET_TRANSCRIBE", str(Path.home() / ".local/bin/parakeet-transcribe")))
+        if not tr.is_file() or not os.access(tr, os.X_OK):
+            raise RuntimeError("Parakeet executable missing. Set PARAKEET_TRANSCRIBE or install it in ~/.local/bin.")
+    elif with_native:
         validate_native()  # Check dependencies before touching login services.
     elif with_voice:
         validate_voice()
     retire_legacy_voice()
-    if with_native:
+    if with_native or with_app:
         retire_other(VOICE)
     elif with_voice:
         retire_other(NATIVE)
     register(SERVER, [str(Path(node).resolve()), str(ROOT / "src/server.mjs")])
-    if with_native:
+    if with_app:
+        register(NATIVE, [str(APP_EXECUTABLE)], native=True)
+    elif with_native:
         register(NATIVE, [str(Path(sys.executable).absolute()), str(NATIVE_FILE)], native=True)
     elif with_voice:
         register(VOICE, [str(Path(sys.executable).absolute()), str(VOICE_FILE)], voice=True)
     else:
-        print("Server installed. To install native overlay also use --with-native.")
+        print("Server installed. To install native overlay use --with-native or --with-app.")
     status()
 
 
@@ -193,6 +203,7 @@ def main() -> int:
     parser.add_argument("command", choices=["install", "status", "uninstall"])
     parser.add_argument("--with-voice", action="store_true", help="Install legacy headless Python voice (instead of native overlay)")
     parser.add_argument("--with-native", action="store_true", help="Install v2 native AppKit menu-bar overlay")
+    parser.add_argument("--with-app", action="store_true", help="Install packaged /Applications/Aegis.app as native LaunchAgent")
     args = parser.parse_args()
     if sys.platform != "darwin":
         print("LaunchAgents only work on macOS.", file=sys.stderr)
@@ -202,7 +213,7 @@ def main() -> int:
         return 2
     try:
         if args.command == "install":
-            install(args.with_voice, args.with_native)
+            install(args.with_voice, args.with_native, args.with_app)
         elif args.command == "uninstall":
             uninstall()
         else:

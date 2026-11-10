@@ -12,6 +12,7 @@ import { vaultNavigationIntent, validateVaultNavigationArgs, executeVaultNavigat
 import { calendarPlanningIntent, validateCalendarPlanningArgs, executeCalendarPlanning } from './calendar-planning.mjs';
 import { indexIntent, INDEX_MUTATIONS, INDEX_READS, validateIndexArgs, executeIndex, indexPreview } from './document-index.mjs';
 import { developerIntent, validateDeveloperArgs, executeDeveloper } from './developer-tools.mjs';
+import { stockQuoteIntent, getStockQuote } from './stock-quotes.mjs';
 
 const SIDE_EFFECTS = new Set(['open_app', 'open_website', 'web_search', 'find_files', 'create_note', 'list_notes']);
 const EXECUTABLE = new Set([...SIDE_EFFECTS, 'get_time', 'help']);
@@ -114,8 +115,10 @@ export async function runTurn(input, hooks = {}) {
   const desktop = Boolean(integrationIntent && (DESKTOP_READ.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent)));
   const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent) || calendarPlan);
   const brief = briefingIntent(text);
+  const stockRequest = !integrationIntent && !brief ? stockQuoteIntent(text) : null;
   const route = brief ? {intent:'daily_briefing',reason:'Explicit read-only daily workflow',source:'Command guardrail'} : integrationIntent
     ? { intent:integrationIntent, reason:'Explicit integration command verified', source:classification?'Kev + guardrail':'Command fallback' }
+    : stockRequest ? {intent:'stock_quote',reason:'Explicit quote request; verified market data required',source:classification?'Kev + quote guardrail':'Quote guardrail'}
     : routeSafe(text, classification, settings.confidenceThreshold);
   let output;
   let model = settings.kevModel;
@@ -191,6 +194,27 @@ export async function runTurn(input, hooks = {}) {
       // Missing parameters are requests for clarification, never permission to guess.
       output = { text: e.message, needsInput:true };
       emit(`${integrationIntent} needs clarification: ${e.message}`, 'warning');
+    }
+  } else if (route.intent === 'stock_quote') {
+    // The 3B must never invent prices. Numeric values come from a bounded,
+    // read-only quote request with source, timestamp and currency validation.
+    model = 'local';
+    if (!stockRequest.symbol) {
+      output = {text:stockRequest.ambiguous ?
+        'Multiple stocks mentioned. Ask for one ticker at a time.' :
+        'Specify a stock ticker (for example, AAPL or ENEL.MI) so I can retrieve a verified quote.',
+        needsInput:true};
+    } else {
+      try {
+        ensureActive();
+        output = await getStockQuote(stockRequest,{signal});
+        ensureActive();
+        emit('Retrieved and validated '+stockRequest.symbol+' quote from Yahoo Finance');
+      } catch (error) {
+        output = {text:'I could not verify a current quote for '+stockRequest.symbol+
+          ' ('+error.message+'). I will not guess the price.',needsInput:false};
+        emit('Quote provider unavailable: '+error.message,'warning');
+      }
     }
   } else if (route.intent === 'ask_llm') {
     model = settings.llmModel;
