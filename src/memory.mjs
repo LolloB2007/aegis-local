@@ -43,6 +43,10 @@ function relativeNote(value) {
 export function memoryIntent(input) {
   const s=String(input||'').trim();
   let m;
+  // Legacy natural-language memory command now uses v2.1's explicit approval
+  // workflow and the single Aegis-owned Persistent memory.md note.
+  if((m=/^(?:please\s+)?remember\s+that\s+(.+)$/i.exec(s)))
+    return {intent:'memory_remember',args:{text:m[1]}};
   if((m=/^(?:please\s+)?(?:create (?:an? )?aegis (?:markdown )?note|create aegis md file)\s*:\s*(.+)$/i.exec(s)))
     return {intent:'memory_note_create',args:{path:m[1]}};
   if(/^(?:please\s+)?(?:start (?:my )?(?:aegis )?(?:daily|today's) note|create today's aegis note)$/i.test(s))

@@ -59,6 +59,7 @@ test('the Ollama system messages contain user-authored prompt and bounded memory
 test('empty note creation is explicit, safely named, and never creates template context',async()=>{
  const settings=await getSettings();
  assert.equal(memoryIntent('Create Aegis Markdown note: Routine Tasks.md').intent,'memory_note_create');
+ assert.equal(memoryIntent('Remember that I prefer short answers').intent,'memory_remember');
  assert.equal(memoryIntent("Start my daily note").intent,'memory_note_create');
  assert.match(dailyNotePath(),/^Daily\/\d{4}-\d\d-\d\d\.md$/);
  assert.throws(()=>validateMemoryArgs('memory_note_create',{path:'../../claude/secret.md'}),/relative Markdown/);

@@ -44,12 +44,15 @@ Start my daily note
 List Aegis memory files
 Show Aegis memory
 Aegis remember: I prefer short morning briefings
+Remember that I prefer short morning briefings
 Add to Aegis to-do list: Review the internship tracker
 Mark Aegis task done: Review the internship tracker
 Add an Aegis routine: Prepare the calendar every Sunday
 Aegis journal: Worked on the Aegis release
 Search Aegis memory for internship
 ```
+
+The legacy `Remember that ...` phrase now uses the confirmed `Persistent memory.md` workflow, not the old standalone notes directory. The separate `Save a note: ...` command still creates ordinary standalone notes outside the protected Obsidian folders.
 
 Each creation or change is **human-confirmed**. Memory edits fail with a helpful message if the target scope note has not yet been created; no hidden templates are generated.
 
