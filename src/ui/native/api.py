@@ -49,24 +49,37 @@ def stream_request(message: str, callback, cancel: threading.Event, response_ref
         response_ref["stream"] = response
         event = "message"
         payload = []
-        for raw in response:
-            if cancel.is_set():
-                break
-            if len(raw) > MAX_EVENT_BYTES:
-                raise RuntimeError("SSE frame too large")
-            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            if not line:
-                if payload:
-                    data = json.loads("\n".join(payload))
-                    callback(event, data)
-                event, payload = "message", []
-                continue
-            if line.startswith(":"):
-                continue
-            if line.startswith("event:"):
-                event = line[6:].strip()
-            elif line.startswith("data:"):
-                payload.append(line[5:].strip())
-                if sum(len(p) for p in payload) > MAX_EVENT_BYTES:
-                    raise RuntimeError("SSE event too large")
-        response_ref.pop("stream", None)
+        completed = False
+        try:
+            try:
+                for raw in response:
+                    if cancel.is_set():
+                        break
+                    if len(raw) > MAX_EVENT_BYTES:
+                        raise RuntimeError("SSE frame too large")
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        if payload:
+                            data = json.loads("\n".join(payload))
+                            callback(event, data)
+                            if event == "done":
+                                completed = True
+                        event, payload = "message", []
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        event = line[6:].strip()
+                    elif line.startswith("data:"):
+                        payload.append(line[5:].strip())
+                        if sum(len(p) for p in payload) > MAX_EVENT_BYTES:
+                            raise RuntimeError("SSE event too large")
+            except (ConnectionResetError, ConnectionAbortedError):
+                # Some macOS TCP stacks reset a connection after a complete
+                # event stream. Never mask an incomplete response.
+                if not (completed or cancel.is_set()):
+                    raise
+            if not (completed or cancel.is_set()):
+                raise RuntimeError("Aegis event stream ended before the done event.")
+        finally:
+            response_ref.pop("stream", None)

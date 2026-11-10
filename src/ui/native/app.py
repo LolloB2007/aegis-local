@@ -87,6 +87,7 @@ class AegisController(NSObject):
         self.voice = None
         self.mode_executor = ThreadPoolExecutor(max_workers=1,thread_name_prefix="aegis-lifecycle")
         self.got_delta = False
+        self.last_health_check = 0.0
         return self
 
     def applicationDidFinishLaunching_(self, _notification):
@@ -388,6 +389,12 @@ class AegisController(NSObject):
 
     # AppKit callbacks: always run on the main GUI thread.
     def pump_(self, _timer):
+        if (not self.gaming and not self.busy and
+            time.monotonic() - self.last_health_check > 15):
+            self.last_health_check = time.monotonic()
+            threading.Thread(
+                target=lambda: self._queue("health", self.service.alive()),
+                daemon=True, name="aegis-health").start()
         updated = False
         for _ in range(120):
             try: event, value, rid = self.events.get_nowait()
@@ -422,6 +429,9 @@ class AegisController(NSObject):
                     if value == "listening":
                         self._display("Listening... Press Option+Space again to stop.")
                     self._show()
+            elif event == "health":
+                if not self.gaming and not self.busy:
+                    self.status_text.setTitle_("Aegis · Idle" if value else "Aegis · Core offline")
             elif event == "status":
                 self.status_text.setTitle_("Aegis · " + str(value)[:42])
                 if self.panel.isVisible() and not self.busy:

@@ -66,6 +66,7 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } =
     if (activeJobs || now-lastWorkAt < IDLE_MODEL_UNLOAD_MS || now-lastIdleSweep < IDLE_MODEL_UNLOAD_MS) return;
     lastIdleSweep = now;
     enqueue(async () => {
+      if (Date.now()-lastWorkAt < IDLE_MODEL_UNLOAD_MS) return; // user activity queued since the sweep was scheduled
       const settings = await getSettings();
       for (const [name,type] of [[settings.llmModel,'generator'],[settings.kevModel,'decision']]) {
         try { await unloadModel(settings,name,type); }
