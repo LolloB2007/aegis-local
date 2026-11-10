@@ -13,7 +13,7 @@ const {runTurn}=await import('../src/agent.mjs');
 const listen=s=>new Promise(resolve=>s.listen(0,'127.0.0.1',resolve));
 const close=s=>new Promise(resolve=>s.close(resolve));
 
-test('Kev classification -> async generator parameter extraction -> human approval -> one-shot execution',async t=>{
+test('explicit tool command skips Kev -> async generator parameter extraction -> human approval -> one-shot execution',async t=>{
  const calls=[];
  const start=new Date(Date.now()+2*86400000).toISOString();
  const end=new Date(Date.now()+2*86400000+3600000).toISOString();
@@ -37,7 +37,7 @@ test('Kev classification -> async generator parameter extraction -> human approv
  assert.equal(proposed.needsInput,true);
  assert.match(proposed.response,/Confirmation required/);
  assert.match(proposed.response,/Project meeting/);
- assert.ok(calls.some(c=>c.path==='/v1/systemone'));
+ assert.ok(!calls.some(c=>c.path==='/v1/systemone'),'Explicit commands must not load Kev');
  assert.ok(calls.some(c=>c.path==='/api/chat'&&c.body.format==='json'));
  const token=proposed.details.confirmationToken;
  assert.match(token,/^[a-f0-9]{12}$/);

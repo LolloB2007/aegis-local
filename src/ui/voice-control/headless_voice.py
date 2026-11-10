@@ -22,7 +22,7 @@ from urllib.request import Request, urlopen
 
 
 def notice(message: str) -> None:
-    print(f"[aegis-voice] {message}", flush=True)
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [aegis-voice] {message}", flush=True)
 
 
 def mac_notification(message: str) -> None:

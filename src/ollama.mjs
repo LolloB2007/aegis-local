@@ -55,9 +55,11 @@ export async function isLoaded(settings, name) {
   } catch { return false; }
 }
 
-function cliStop(name) {
+function cliStop(settings, name) {
   return new Promise((resolve, reject) => {
-    const child = spawn('ollama', ['stop', name], { stdio: ['ignore', 'ignore', 'pipe'] });
+    // Target the configured Ollama server, not whatever OLLAMA_HOST defaults to.
+    const env = { ...process.env, OLLAMA_HOST: settings.ollamaUrl };
+    const child = spawn('ollama', ['stop', name], { stdio: ['ignore', 'ignore', 'pipe'], env });
     let detail = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), 12000);
     child.stderr.on('data', data => detail += data.toString().slice(0, 250));
@@ -71,21 +73,18 @@ function cliStop(name) {
 
 export async function unloadModel(settings, model, type = 'generator') {
   if (!(await isLoaded(settings, model))) return { changed: false, method: 'already-unloaded' };
-  // Ollama's System One endpoint is not documented to accept keep_alive.
-  // The documented CLI command is the safest way to stop a decision model.
-  if (type === 'decision') {
-    try { await cliStop(model); return { changed: true, method: 'ollama stop' }; }
+  // `ollama stop` is itself just /api/generate with keep_alive 0, so call the
+  // configured server directly and only fall back to the CLI if that fails.
+  try {
+    await post(settings, '/api/generate', { model, prompt: '', keep_alive: 0 }, 20000);
+    return { changed: true, method: 'generate-unload' };
+  } catch (httpError) {
+    try { await cliStop(settings, model); return { changed: true, method: 'ollama stop' }; }
     catch (cliError) {
-      try {
-        await post(settings, '/api/generate', { model, prompt: '', keep_alive: 0 }, 20000);
-        return { changed: true, method: 'generate-unload' };
-      } catch {
-        throw new Error(`Couldn't unload Kev (${cliError.message}). Set OLLAMA_MAX_LOADED_MODELS=1 and restart Ollama, or ensure the ollama CLI is on PATH.`);
-      }
+      const label = type === 'decision' ? 'Kev' : model;
+      throw new Error(`Couldn't unload ${label} (${httpError.message}; ${cliError.message}). Set OLLAMA_MAX_LOADED_MODELS=1 and restart Ollama.`);
     }
   }
-  await post(settings, '/api/generate', { model, prompt: '', keep_alive: 0 }, 20000);
-  return { changed: true, method: 'generate-unload' };
 }
 
 export const ROUTE_CRITERIA = Object.freeze({

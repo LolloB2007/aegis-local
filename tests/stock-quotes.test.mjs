@@ -96,3 +96,15 @@ test('end-to-end: stock question bypasses BOTH models and returns verified quote
   assert.ok(!mockCalls.includes('/v1/systemone'),'Quote reads must not load Kev');
   assert.ok(!mockCalls.includes('/api/chat'),'The 3B must not generate a market quote');
 });
+
+test('ordinary questions with capitals or company words are not hijacked into quotes',()=>{
+  for(const text of [
+    'How much should I save per month?',
+    'How much RAM do I need for Xcode?',
+    'What is the price of an iPhone in EUR?',
+    'How much does a visa to the US cost now?'
+  ])assert.equal(stockQuoteIntent(text),null,text);
+  assert.equal(stockQuoteIntent('How much is TSLA trading at').symbol,'TSLA');
+  assert.equal(stockQuoteIntent("What's the price of BTC-USD now").symbol,'BTC-USD');
+  assert.equal(stockQuoteIntent('what is the stock price').symbol,null);
+});

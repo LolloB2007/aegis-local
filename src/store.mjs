@@ -1,8 +1,13 @@
 import fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const home = process.env.AEGIS_HOME || os.homedir();
+// Canonicalize once: symlink checks compare realpath() results against paths
+// derived from home, so home itself must not traverse a symlink (e.g. macOS
+// /var -> /private/var, or a relocated home folder).
+const rawHome = process.env.AEGIS_HOME || os.homedir();
+const home = (() => { try { return realpathSync(rawHome); } catch { return path.resolve(rawHome); } })();
 const dataDir = path.join(home, '.aegis-local');
 const configPath = path.join(dataDir, 'settings.json');
 const historyPath = path.join(dataDir, 'history.json');
@@ -28,8 +33,14 @@ export const defaults = Object.freeze({
   preferredBrowser: 'chrome'
 });
 
+const rawHomeResolved = path.resolve(rawHome);
+function canonicalPrefix(resolved) {
+  if (rawHomeResolved === home) return resolved;
+  if (resolved === rawHomeResolved) return home;
+  return resolved.startsWith(rawHomeResolved + path.sep) ? path.join(home, resolved.slice(rawHomeResolved.length + 1)) : resolved;
+}
 export const expandHome = value => typeof value === 'string'
-  ? (value === '~' ? home : value.startsWith('~/') ? path.join(home, value.slice(2)) : path.resolve(value))
+  ? (value === '~' ? home : value.startsWith('~/') ? path.join(home, value.slice(2)) : canonicalPrefix(path.resolve(value)))
   : home;
 
 export function inUserHome(filePath) {
