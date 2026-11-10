@@ -2,3 +2,4 @@
 pyobjc-framework-Cocoa>=10.3,<14
 pyobjc-framework-Quartz>=10.3,<14
 pynput>=1.8,<2
+pyobjc-framework-AVFoundation>=10.3,<14

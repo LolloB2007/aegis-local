@@ -226,11 +226,11 @@ class HeadlessVoice:
                 self._state("transcribing")
                 return
 
-            if not microphone_permission(self._state):
-                return
-            backend = os.environ.get("AEGIS_MIC_BACKEND", "native").strip().lower()
+            backend = os.environ.get("AEGIS_MIC_BACKEND", "native" if self.on_state else "ffmpeg").strip().lower()
             if backend not in ("native", "ffmpeg"):
                 self._state("error: AEGIS_MIC_BACKEND must be native or ffmpeg.")
+                return
+            if backend == "native" and not microphone_permission(self._state):
                 return
             self.record_dir = Path(tempfile.mkdtemp(prefix="aegis-voice-"))
             self.record_path = self.record_dir / "recording.wav"

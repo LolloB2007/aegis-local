@@ -177,6 +177,38 @@ First run the native controller interactively:
 
 Look for the **Λ** menu-bar icon. There should be no panel while idle. Test the quick-text shortcut, fullscreen overlay, then voice and approvals. The v2 RC uses a Python venv; packaging into a signed `.app` bundle is recommended for stable long-term macOS Accessibility/TCC permissions but is not validated here.
 
+### Build and install Aegis.app (recommended on macOS)
+
+Aegis now records microphone audio through **AVAudioRecorder inside Aegis.app**
+by default. This allows macOS microphone permission to apply directly to the
+packaged process and uses the system's selected microphone, not FFmpeg's
+ambiguous `:0` audio index. Audio peak/RMS levels are checked before invoking
+Parakeet, and failures are visible in the panel and native log. Recordings
+and transcripts are deleted after processing. The optional legacy FFmpeg
+fallback uses `AEGIS_MIC_BACKEND=ffmpeg` and `AEGIS_AUDIO_DEVICE=:N`.
+
+From a clean local checkout with a Python virtual environment:
+
+```bash
+.venv/bin/python -m pip install -r requirements-native.txt
+.venv/bin/python -m pip install pyinstaller
+.venv/bin/python scripts/build-macos-app.py
+ditto dist/Aegis.app /Applications/Aegis.app
+.venv/bin/python scripts/install-launchagents.py install --with-app
+.venv/bin/python scripts/install-launchagents.py status
+```
+
+This installs the **packaged app executable**, not the venv interpreter, plus
+the existing guarded Node service. Allow microphone access to **Aegis** in
+macOS Settings when prompted. There is no supported command to force a TCC
+microphone grant. If capture fails, inspect
+`~/.aegis-local/logs/native.log` for `Audio diagnostic: ... peak=... RMS=...`
+and review the panel's explicit `Voice error`.
+
+The app is ad-hoc signed for local testing only; developer signing and
+notarization are required for distribution. It does **not** bundle Ollama,
+Node.js, or Parakeet, so they must be installed separately.
+
 ### Start at every login: two per-user LaunchAgents
 
 Run the installer **on your Mac** (not via GitHub), without `sudo`, from the repository root:

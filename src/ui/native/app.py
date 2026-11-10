@@ -26,7 +26,8 @@ from selected_text import selected_text
 from preferences import load_gaming, save_gaming
 
 # Reuse the tested recorder/transcriber; native UI owns the hotkeys and responses.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "voice-control"))
+if not getattr(sys, 'frozen', False):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "voice-control"))
 from headless_voice import HeadlessVoice
 
 
@@ -433,6 +434,12 @@ class AegisController(NSObject):
                     self._set_status(value)
                     if value == "listening":
                         self._display("Listening... Press Option+Space again to stop.")
+                    elif value == "microphone_permission":
+                        self._display("Allow Aegis microphone access in the macOS dialog. Then press Option+Space again.", keep=True)
+                    elif isinstance(value, str) and value.startswith("error:"):
+                        self._display("Voice error: " + value[6:].strip(), keep=True)
+                    elif isinstance(value, str) and "Microphone enabled" in value:
+                        self._display(value, keep=True)
                     self._show()
             elif event == "health":
                 if not self.gaming and not self.busy:

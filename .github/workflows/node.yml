@@ -36,6 +36,9 @@ jobs:
           python-version: "3.12"
       - name: Install native UI dependencies
         run: python -m pip install -r requirements-native.txt
+      - name: Import AVFoundation for native microphone capture
+        run: |
+          python -c "import AVFoundation as a; assert a.AVAudioRecorder; assert a.AVCaptureDevice; print('Native microphone framework available')"
       - name: Import PyObjC controller and verify fullscreen constants
         run: |
           python -c "import AppKit as a; assert a.NSWindowCollectionBehaviorCanJoinAllSpaces; assert a.NSWindowCollectionBehaviorFullScreenAuxiliary; assert a.NSWindowCollectionBehaviorStationary; assert a.NSPopUpMenuWindowLevel"
