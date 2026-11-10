@@ -3,7 +3,6 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {expandHome,inUserHome} from './store.mjs';
 
-const run=promisify(execFile);
 const script=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../scripts/local_index.py');
 export const INDEX_MUTATIONS=new Set(['index_rebuild']);
 export const INDEX_READS=new Set(['index_search']);
@@ -35,6 +34,7 @@ async function pythonTask(intent,p,settings) {
   proc.stdout.on('data',chunk=>{out+=chunk;if(out.length>180000)proc.kill();});
   proc.stderr.on('data',chunk=>{err+=chunk;if(err.length>4000)err=err.slice(-4000);});
   proc.on('error',reject);
+  proc.stdin.on('error',()=>{});
   proc.on('close',code=>{
     clearTimeout(timer);
     if(code!==0){reject(new Error('Local document index failed: '+(err||out).slice(0,350)));return;}
