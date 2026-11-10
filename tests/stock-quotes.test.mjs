@@ -43,3 +43,56 @@ test('reject mismatched, stale, invalid, and rate-limited quotes',async()=>{
   await assert.rejects(getStockQuote({symbol:'AAPL'},{now,fetchImpl:mock({symbol:'AAPL',regularMarketPrice:null,currency:'USD',regularMarketTime:now/1000})}),/Price or currency/);
   await assert.rejects(getStockQuote({symbol:'AAPL'},{now,fetchImpl:async()=>({ok:false,status:429})}),/429/);
 });
+
+
+test('end-to-end: Kev says ask_llm, but market question uses verified quote without generator',async t=>{
+  const fs=await import('node:fs/promises');
+  const os=await import('node:os');
+  const path=await import('node:path');
+  const http=await import('node:http');
+  const home=await fs.mkdtemp(path.join(os.tmpdir(),'aegis-stock-e2e-'));
+  const formerHome=process.env.AEGIS_HOME;
+  process.env.AEGIS_HOME=home;
+  const mockCalls=[];
+  const ollama=http.createServer(async(req,res)=>{
+    let body='';
+    for await(const chunk of req)body+=chunk.toString();
+    mockCalls.push(req.url);
+    res.setHeader('Content-Type','application/json');
+    if(req.url==='/api/ps')return res.end('{"models":[]}');
+    if(req.url==='/v1/systemone')return res.end(JSON.stringify({
+      answers:{intent:{choice:'ask_llm',probabilities:{ask_llm:.95},confidence:.95},
+        target_app:{choice:'none'}}
+    }));
+    if(req.url==='/api/chat')return res.end(JSON.stringify({message:{content:'You can look it up.'}}));
+    return res.end('{}');
+  });
+  await new Promise(resolve=>ollama.listen(0,'127.0.0.1',resolve));
+  const oldFetch=globalThis.fetch;
+  const now=Math.floor(Date.now()/1000);
+  globalThis.fetch=async(input,options)=>{
+    if(String(input).startsWith('https://query1.finance.yahoo.com/v8/finance/chart/'))
+      return {ok:true,text:async()=>JSON.stringify({chart:{result:[{meta:{
+        symbol:'AAPL',shortName:'Apple Inc.',currency:'USD',
+        regularMarketPrice:250.25,previousClose:249.75,regularMarketTime:now
+      }}]}})};
+    return oldFetch(input,options);
+  };
+  t.after(async()=>{
+    globalThis.fetch=oldFetch;
+    await new Promise(resolve=>ollama.close(resolve));
+    await fs.rm(home,{recursive:true,force:true});
+    if(formerHome===undefined)delete process.env.AEGIS_HOME;
+    else process.env.AEGIS_HOME=formerHome;
+  });
+  const {saveSettings}=await import('../src/store.mjs');
+  const {runTurn}=await import('../src/agent.mjs');
+  await saveSettings({ollamaUrl:'http://127.0.0.1:'+ollama.address().port,autoReloadKev:false});
+  const response=await runTurn("What's Apple's stock price?");
+  assert.equal(response.action,'stock_quote');
+  assert.match(response.response,/250\.25 USD/);
+  assert.match(response.response,/Market timestamp/);
+  assert.doesNotMatch(response.response,/look it up/i);
+  assert.ok(mockCalls.includes('/v1/systemone'),'Kev was consulted for classification');
+  assert.ok(!mockCalls.includes('/api/chat'),'The 3B must not generate a market quote');
+});
