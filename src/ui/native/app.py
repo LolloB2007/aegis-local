@@ -85,6 +85,8 @@ class AegisController(NSObject):
         self.history = deque(maxlen=RECENT_LIMIT)
         self.hide_after = None
         self.hotkeys = None
+        self._last_hotkey_attempt = 0.0
+        self._last_hotkey_watch = 0.0
         self.voice = None
         self.mode_executor = ThreadPoolExecutor(max_workers=1,thread_name_prefix="aegis-lifecycle")
         self.got_delta = False
@@ -192,6 +194,7 @@ class AegisController(NSObject):
         self._menu("Speak  ⌥Space", "menuVoice:")
         self._menu("Quick text  ⌥⇧Space", "menuText:")
         self._menu("Explain selected text  ⌥⇧S", "menuSelection:")
+        self._menu("Restart Keyboard Shortcuts", "restartHotkeys:")
         self.menu.addItem_(AK.NSMenuItem.separatorItem())
         self.gaming_item = self._menu("Enter Gaming Mode", "menuGaming:")
         self._menu("Restart Core", "restartCore:")
@@ -230,6 +233,7 @@ class AegisController(NSObject):
     def _start_hotkeys(self):
         if self.gaming or self.hotkeys:
             return
+        self._last_hotkey_attempt = time.monotonic()
         try:
             from pynput.keyboard import GlobalHotKeys
             handlers = {
@@ -238,8 +242,10 @@ class AegisController(NSObject):
             }
             self.hotkeys = GlobalHotKeys(handlers)
             self.hotkeys.start()
+            print("[aegis-native] Global hotkey listener started", flush=True)
         except Exception as error:
             self.hotkeys = None
+            print("[aegis-native] Hotkey startup failure: " + str(error), flush=True)
             self._queue("status", "Global hotkeys unavailable: " + str(error))
 
     @objc.python_method
@@ -249,6 +255,31 @@ class AegisController(NSObject):
                 self.hotkeys.stop()
             finally:
                 self.hotkeys = None
+
+    @objc.python_method
+    def _watch_hotkeys(self):
+        # pynput's macOS event tap can die after a permission change or an
+        # unhandled listener callback. Detect it without busy-looping.
+        if self.gaming:
+            return
+        now = time.monotonic()
+        if now - self._last_hotkey_watch < 5:
+            return
+        self._last_hotkey_watch = now
+        if self.hotkeys and self.hotkeys.is_alive():
+            return
+        if now - self._last_hotkey_attempt < 15:
+            return
+        print("[aegis-native] Hotkey listener is down; attempting recovery", flush=True)
+        if self.hotkeys:
+            try:
+                self._stop_hotkeys()
+            except Exception as error:
+                print("[aegis-native] Hotkey cleanup failed: " + str(error), flush=True)
+                self.hotkeys = None
+        self._start_hotkeys()
+        if not self.hotkeys:
+            self._queue("status", "Hotkeys unavailable. Check Accessibility and Input Monitoring.")
 
     @objc.python_method
     def _screen(self):
@@ -395,6 +426,23 @@ class AegisController(NSObject):
 
     # AppKit callbacks: always run on the main GUI thread.
     def pump_(self, _timer):
+        # Never let a recoverable Python event-handler error kill the AppKit
+        # callback loop; an Objective-C-level crash still needs a crash log.
+        try:
+            self._pump_events()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._display("Aegis UI error. See ~/.aegis-local/logs/native-error.log", keep=True)
+                self._set_status("UI error")
+                self._show()
+            except Exception:
+                traceback.print_exc()
+
+    @objc.python_method
+    def _pump_events(self):
+        self._watch_hotkeys()
         if (not self.gaming and not self.busy and
             time.monotonic() - self.last_health_check > 15):
             self.last_health_check = time.monotonic()
@@ -552,6 +600,17 @@ class AegisController(NSObject):
         self._show(text_focus=True)
     def menuSelection_(self, _sender):
         self._queue("hotkey","selection")
+    def restartHotkeys_(self, _sender):
+        self._last_hotkey_attempt = 0
+        if self.hotkeys:
+            try:
+                self._stop_hotkeys()
+            except Exception as error:
+                print("[aegis-native] Manual hotkey restart error: " + str(error), flush=True)
+                self.hotkeys = None
+        self._start_hotkeys()
+        self._set_status("Keyboard shortcuts restarted" if self.hotkeys else
+                         "Shortcuts unavailable. Check macOS privacy settings.")
     def menuGaming_(self, _sender):
         self._toggle_gaming()
 

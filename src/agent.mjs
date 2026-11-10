@@ -47,6 +47,9 @@ export async function runTurn(input, hooks = {}) {
   let classification = null;
   let classifiedError = null;
   const started = Date.now();
+  // Stock quotes need verified data but neither model: decide this deterministically
+  // BEFORE waking Kev. This also prevents plain price requests opening Chrome.
+  const quoteCommand = stockQuoteIntent(text);
 
   // Confirmation commands are deliberately not interpreted by an LLM.
   const approvalCommand = /^(confirm|cancel)\s+([a-f0-9]{12})$/i.exec(text);
@@ -86,16 +89,20 @@ export async function runTurn(input, hooks = {}) {
       model:'local',modelMeta:null,elapsedMs:Date.now()-started,warning:null };
   }
 
-  if (settings.autoUnload && await isLoaded(settings, settings.llmModel)) {
+  if (!quoteCommand && settings.autoUnload && await isLoaded(settings, settings.llmModel)) {
     try { await unloadModel(settings, settings.llmModel, 'generator'); emit('Unloaded text model before Kev'); }
     catch (e) { emit(`Could not unload text model: ${e.message}`, 'warning'); }
   }
-  try {
-    classification = await classify(settings, text);
-    emit(`Kev classified: ${classification.intent} (${Math.round(classification.probability * 100)}% top-choice probability)`);
-  } catch (e) {
-    classifiedError = e.message;
-    emit(`Kev unavailable: ${e.message}`, 'warning');
+  if (!quoteCommand) {
+    try {
+      classification = await classify(settings, text);
+      emit(`Kev classified: ${classification.intent} (${Math.round(classification.probability * 100)}% top-choice probability)`);
+    } catch (e) {
+      classifiedError = e.message;
+      emit(`Kev unavailable: ${e.message}`, 'warning');
+    }
+  } else {
+    emit('Verified quote request; skipping local models and browser launch');
   }
 
   ensureActive();
@@ -115,11 +122,13 @@ export async function runTurn(input, hooks = {}) {
   const desktop = Boolean(integrationIntent && (DESKTOP_READ.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent)));
   const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent) || calendarPlan);
   const brief = briefingIntent(text);
-  const stockRequest = !integrationIntent && !brief ? stockQuoteIntent(text) : null;
-  const route = brief ? {intent:'daily_briefing',reason:'Explicit read-only daily workflow',source:'Command guardrail'} : integrationIntent
-    ? { intent:integrationIntent, reason:'Explicit integration command verified', source:classification?'Kev + guardrail':'Command fallback' }
-    : stockRequest ? {intent:'stock_quote',reason:'Explicit quote request; verified market data required',source:classification?'Kev + quote guardrail':'Quote guardrail'}
-    : routeSafe(text, classification, settings.confidenceThreshold);
+  const stockRequest = quoteCommand;
+  const route = stockRequest
+    ? {intent:'stock_quote',reason:'Explicit quote request; verified HTTPS market data, no browser or LLM required',source:'Quote guardrail'}
+    : brief ? {intent:'daily_briefing',reason:'Explicit read-only daily workflow',source:'Command guardrail'}
+    : integrationIntent
+      ? {intent:integrationIntent,reason:'Explicit integration command verified',source:classification?'Kev + guardrail':'Command fallback'}
+      : routeSafe(text, classification, settings.confidenceThreshold);
   let output;
   let model = settings.kevModel;
   let modelMeta = null;
@@ -145,7 +154,7 @@ export async function runTurn(input, hooks = {}) {
         rawArgs = await planIntegration(settings, integrationIntent, text);
         emit('Text model extracted structured parameters (not executable commands)');
       } finally {
-        if (settings.autoReloadKev && !signal?.aborted) {
+        if (settings.autoReloadKev && !settings.autoUnload && !signal?.aborted) {
           try { await warmKev(settings); emit('Re-loaded Kev after tool planning'); }
           catch (e) { emit(`Kev re-load failed: ${e.message}`, 'warning'); }
         }
@@ -240,7 +249,7 @@ export async function runTurn(input, hooks = {}) {
       const note = !classifiedError ? '' : ' Kev was also unavailable.';
       throw new Error(`${e.message}${note} Confirm the LLM tag in Settings and run ollama pull <model>.`);
     } finally {
-      if (settings.autoReloadKev && !signal?.aborted) {
+      if (settings.autoReloadKev && !settings.autoUnload && !signal?.aborted) {
         try { await warmKev(settings); emit('Re-loaded Kev for the next command'); }
         catch (e) { emit(`Kev re-load failed: ${e.message}`, 'warning'); }
       }

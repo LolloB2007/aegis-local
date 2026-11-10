@@ -4,6 +4,25 @@ Local-first macOS assistant for an M1 MacBook Air with **8 GB RAM**. **No Electr
 
 > **Release-candidate status:** The native panel, global hotkeys, microphone access, Accessibility permissions, fullscreen Spaces, and LaunchAgent startup must be verified on the target Mac. Passing CI does not prove fullscreen or microphone behavior. See [RC verification checklist](docs/RELEASE_CANDIDATE_CHECKLIST.md).
 
+## Low-memory model residency and native recovery (8 GB M1)
+
+Aegis now releases **both** configured Ollama models shortly after the last
+queued request finishes (including failed/cancelled requests) when
+`autoUnload` is enabled. It does not warm Kev again just to keep it resident;
+the default `autoReloadKev` is now `false`. Existing settings persist, but
+any saved `autoReloadKev=true` is ignored while `autoUnload=true`.
+A quote question uses deterministic read-only HTTPS retrieval without loading
+either model or automatically opening Chrome. Ollama itself stays available
+for other apps: Aegis unloads only its own configured two model tags.
+An explicit `autoUnload=false` preference still opts out of eager unload;
+set it back to `true` if you want models fully off between requests.
+
+The native PyObjC controller monitors its `pynput` hotkey listener and
+attempts a bounded restart if the listener dies; event-loop Python exceptions
+are logged rather than silently terminating the interface. macOS
+Accessibility/Input Monitoring permissions are still necessary, and a native
+segfault or system-level process kill requires its crash report to diagnose.
+
 ## Verified stock quotes (read-only)
 
 Ask `What's Apple's stock price?`, `What is the price of NVDA?`, or

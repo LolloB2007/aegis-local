@@ -45,7 +45,7 @@ export async function runBriefing(settings, {emit=()=>{},onDelta=null,signal=nul
     check();
     return {text:result.content,details:{calendar:calendar.details||null,taskMatches:tasks.details?.tasks?.length||0}};
   } finally {
-    if (settings.autoReloadKev && !signal?.aborted) {
+    if (settings.autoReloadKev && !settings.autoUnload && !signal?.aborted) {
       try {await warmKev(settings);} catch(e){emit('Kev warm warning: '+e.message);}
     }
   }

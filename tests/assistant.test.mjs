@@ -102,7 +102,7 @@ test('e2e: real HTTP app, mocked Ollama, persisted Markdown notes and model hand
   assert.match(explanation.json.response, /systematic risk/);
   assert.ok(observed.some(event => event.endpoint === '/api/chat' && event.body.keep_alive === 0));
   assert.ok(observed.some(event => event.endpoint === '/api/generate' && event.body.model === 'kev:0.8b-q8_0' && event.body.keep_alive === 0));
-  assert.equal(loaded.has('kev:0.8b-q8_0'), true, 'Kev prewarmed');
+  assert.equal(loaded.has('kev:0.8b-q8_0'), false, 'Kev must not be re-warmed while autoUnload is enabled');
   assert.equal(loaded.has('llama3.2:3b'), false, 'LLM unloaded');
 
   const history = await getHistory();
