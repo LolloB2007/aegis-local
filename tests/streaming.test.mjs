@@ -57,7 +57,7 @@ test('SSE streams model deltas and a complete result from the guarded queue',asy
  const base='http://127.0.0.1:'+server.address().port;
  const health=await fetch(base+'/api/health').then(r=>r.json());
  assert.equal(health.ok,true);
- assert.match(health.version,/2\.0/);
+ assert.match(health.version,/2\.1/);
  const resp=await fetch(base+'/api/stream',{method:'POST',
    headers:{'Content-Type':'application/json','X-Aegis-Local':'1'},
    body:JSON.stringify({message:'Explain interest rates'})});

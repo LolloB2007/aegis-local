@@ -18,7 +18,7 @@ export const CALENDAR_SCHEMAS=Object.freeze({
 });
 export function calendarPlanningIntent(text) {
   const s=String(text||'').trim();
-  if(/^(?:please\s+)?(?:find|show|suggest|look for)\s+.+\b(?:free|available)\s+(?:time|slots?|hours?)\b/i.test(s)||
+  if(/^(?:please\s+)?(?:find|show|suggest|look for)\s+(?:.+\s+)?(?:free|available)\s+(?:time|slots?|hours?)\b/i.test(s)||
      /^(?:please\s+)?(?:when am i free|find me (?:a )?(?:free|available) (?:slot|block))\b/i.test(s))
     return 'calendar_free';
   if(/^(?:please\s+)?(?:check|find)\s+(?:for\s+)?(?:calendar\s+)?conflicts?\b/i.test(s)||
