@@ -14,34 +14,38 @@ const NAMES=Object.freeze([
   ['leonardo','LDO.MI'],['asml','ASML'],['lvmh','MC.PA']
 ]);
 const SYMBOL=/^[A-Z0-9^][A-Z0-9.^-]{0,14}$/;
-const BAD_SYMBOLS=new Set(['THE','FOR','OF','IS','AT','NOW','TODAY','STOCK','SHARE','PRICE','QUOTE','WHAT','HOW','MY','A','ON']);
+// Uppercase words that are never quote targets in a sentence (pronouns,
+// currencies, hardware terms) so "How much RAM should I buy?" is not a quote.
+const BAD_SYMBOLS=new Set(['THE','FOR','OF','IS','AT','NOW','TODAY','STOCK','SHARE','PRICE','QUOTE','WHAT','HOW','MY','A','ON',
+  'I','IN','IT','TO','US','USA','UK','EU','OK','AM','PM','USD','EUR','GBP','JPY','CHF','CNY','CAD','AUD',
+  'RAM','CPU','GPU','SSD','HDD','TV','PC','AI','API','IOS','MAC']);
+const TICKER='[A-Z]{1,7}(?:[.-][A-Z]{1,4})?';
+const companyPattern=name=>new RegExp('(?:^|[^a-z])'+name+'(?:$|[^a-z])','i');
 
 export function stockQuoteIntent(message) {
   const text=String(message||'').trim();
   if(/^(?:open|launch|visit|browse)\b/i.test(text))return null;
   if(/\b(?:why|forecast|prediction|predict|target price|price target|historical|history|chart|trend|analysis|valuation|dividend|should i buy|how to)\b/i.test(text))return null;
   if(!/\b(?:price|quote|trading at|how much|worth|stock at)\b/i.test(text))return null;
+  if(!/\b(?:what|how much|latest|current|today|now|give|show|check|tell|quote|price|look up|trading)\b/i.test(text))return null;
   const isStock=/\b(?:stock|shares?|ticker|quote|trading at)\b/i.test(text);
-  const explicit=/\$[A-Z]{1,7}\b|\b(?:NASDAQ|NYSE|NYSEARCA|BIT):[A-Z0-9.-]+\b/.test(text);
-  const capitalSymbol=/\b[A-Z]{1,7}(?:\.[A-Z]{1,3})?\b/.test(text);
-  // Known listed-company names plus a clear price request should be answered
-  // as quotes even when the user omits the word "stock" (e.g. "look up
-  // Apple's price"), rather than triggering a browser-only search.
-  const knownCompany=NAMES.some(([name])=>
-    new RegExp('(?:^|[^a-z])'+name+'(?:$|[^a-z])','i').test(text));
-  if(!isStock && !(explicit||capitalSymbol||knownCompany))return null;
-  if(!/\b(?:what|how much|latest|current|today|now|give|show|check|tell|quote|price)\b/i.test(text))return null;
   const candidates=new Set();
-  for(const match of text.matchAll(/(?:\$|\b(?:NASDAQ|NYSE|NYSEARCA|BIT):)([A-Z][A-Z0-9.-]{0,14})\b/g))candidates.add(match[1]);
-  // Safe to interpolate: all fixed lookup names contain only ASCII letters and spaces.
-  for(const [name,ticker] of NAMES) {
-    if(new RegExp('(?:^|[^a-z])'+name+'(?:$|[^a-z])','i').test(text))candidates.add(ticker);
-  }
+  for(const match of text.matchAll(new RegExp('(?:\\$|\\b(?:NASDAQ|NYSE|NYSEARCA|BIT):)('+TICKER+')\\b','g')))candidates.add(match[1]);
   for(const match of [
-    ...text.matchAll(/\b([A-Z]{1,7}(?:\.[A-Z]{1,3})?)\s+(?:stock|shares?|quote|price)\b/g),
-    ...text.matchAll(/\b(?:price|quote|stock|shares?)\s+(?:of|for|in)?\s*([A-Z]{1,7}(?:\.[A-Z]{1,3})?)\b/g)
+    ...text.matchAll(new RegExp('\\b('+TICKER+')\\s+(?:stock|shares?|quote|price|is trading|trading)\\b','g')),
+    ...text.matchAll(new RegExp('\\b(?:price|quote|stock|shares?)\\s+(?:of|for|on)?\\s*('+TICKER+')\\b','g')),
+    ...text.matchAll(new RegExp('\\b(?:is|are)\\s+('+TICKER+')\\s+(?:trading|worth|at)\\b','g'))
   ])if(!BAD_SYMBOLS.has(match[1]))candidates.add(match[1]);
+  // Company names only count with an explicit price/quote word, so "how much
+  // does a visa cost" stays a normal question rather than a Visa Inc. quote.
+  if(isStock || /\b(?:price|quote|trading)\b/i.test(text)) {
+    // Safe to interpolate: all fixed lookup names contain only ASCII letters and spaces.
+    for(const [name,ticker] of NAMES)if(companyPattern(name).test(text))candidates.add(ticker);
+  }
   const valid=[...candidates].filter(symbol=>SYMBOL.test(symbol));
+  // Without a recognised ticker the request only belongs here if the user said
+  // "stock"/"shares"/"quote"; otherwise let normal routing answer it.
+  if(!valid.length && !isStock)return null;
   return {symbol:valid.length===1?valid[0]:null,ambiguous:valid.length>1,candidates:valid.slice(0,6)};
 }
 

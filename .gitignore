@@ -5,6 +5,7 @@ src/ui/voice-control/node_modules/
 # Build outputs
 dist/
 build/
+*.spec
 
 # Logs
 *.log
@@ -30,3 +31,6 @@ Library/Logs/
 .venv/
 __pycache__/
 *.pyc
+
+# graphify knowledge graph (local tooling output)
+graphify-out/

@@ -24,12 +24,15 @@ def main() -> int:
         sys.executable, "-m", "PyInstaller",
         "--clean", "--noconfirm", "--onedir", "--windowed",
         "--name", "Aegis",
+        # Keep the generated .spec (it embeds absolute paths) out of the repo root.
+        "--specpath", str(ROOT / "build"),
         "--osx-bundle-identifier", "com.aegis.local.native",
         "--paths", str(ROOT / "src/ui/native"),
         "--paths", str(ROOT / "src/ui/voice-control"),
         "--hidden-import", "app",
         "--hidden-import", "headless_voice",
         "--hidden-import", "AVFoundation",
+        "--hidden-import", "HIServices",
         "--hidden-import", "pynput.keyboard._darwin",
         str(ROOT / "scripts/aegis_app_entry.py"),
     ]
@@ -46,9 +49,13 @@ def main() -> int:
     with plist.open("wb") as stream:
         plistlib.dump(data, stream)
     # Editing Info.plist invalidates the build-time signature; re-sign after.
-    # Ad-hoc identity is only for personal testing, not notarized distribution.
+    # macOS keys Accessibility/Microphone grants for ad-hoc apps to the exact
+    # binary hash, so every ad-hoc rebuild silently drops those permissions.
+    # Set AEGIS_CODESIGN_IDENTITY to a (self-signed) code-signing certificate
+    # name from Keychain Access to keep grants stable across rebuilds.
+    identity = os.environ.get("AEGIS_CODESIGN_IDENTITY", "").strip() or "-"
     subprocess.run([
-        "/usr/bin/codesign", "--force", "--deep", "--sign", "-", str(APP)
+        "/usr/bin/codesign", "--force", "--deep", "--sign", identity, str(APP)
     ], check=True)
     subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(APP)], check=True)
     print("\nBuilt " + str(APP))
@@ -56,6 +63,10 @@ def main() -> int:
     print("  ditto dist/Aegis.app /Applications/Aegis.app")
     print("  .venv/bin/python scripts/install-launchagents.py install --with-app")
     print("The native app must receive microphone permission when macOS asks.")
+    if identity == "-":
+        print("\nNOTE: ad-hoc signed. macOS treats each rebuild as a new app, so re-enable")
+        print("Aegis under Privacy & Security > Accessibility (and Microphone) after installing,")
+        print("or set AEGIS_CODESIGN_IDENTITY to a stable code-signing certificate.")
     return 0
 
 if __name__ == "__main__":

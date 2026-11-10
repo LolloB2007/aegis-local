@@ -89,24 +89,10 @@ export async function runTurn(input, hooks = {}) {
       model:'local',modelMeta:null,elapsedMs:Date.now()-started,warning:null };
   }
 
-  if (!quoteCommand && settings.autoUnload && await isLoaded(settings, settings.llmModel)) {
-    try { await unloadModel(settings, settings.llmModel, 'generator'); emit('Unloaded text model before Kev'); }
-    catch (e) { emit(`Could not unload text model: ${e.message}`, 'warning'); }
-  }
-  if (!quoteCommand) {
-    try {
-      classification = await classify(settings, text);
-      emit(`Kev classified: ${classification.intent} (${Math.round(classification.probability * 100)}% top-choice probability)`);
-    } catch (e) {
-      classifiedError = e.message;
-      emit(`Kev unavailable: ${e.message}`, 'warning');
-    }
-  } else {
-    emit('Verified quote request; skipping local models and browser launch');
-  }
-
-  ensureActive();
   // New tools require a user-command grammar match, never Kev's guess alone.
+  // Resolve every deterministic route first: Kev is only loaded when none of
+  // them claims the turn, which keeps an 8 GB Mac from paging in a model just
+  // to confirm "open Safari" or a vault/calendar command.
   const memoryCommand = memoryIntent(text);
   const vaultCommand = vaultNavigationIntent(text);
   const calendarCommand = calendarPlanningIntent(text);
@@ -123,11 +109,32 @@ export async function runTurn(input, hooks = {}) {
   const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent) || calendarPlan);
   const brief = briefingIntent(text);
   const stockRequest = quoteCommand;
+  const deterministic = Boolean(quoteCommand || brief || integrationIntent || explicitIntent(text));
+
+  if (quoteCommand) {
+    emit('Verified quote request; skipping local models and browser launch');
+  } else if (deterministic) {
+    emit('Explicit command recognised; Kev not needed');
+  } else {
+    if (settings.autoUnload && await isLoaded(settings, settings.llmModel)) {
+      try { await unloadModel(settings, settings.llmModel, 'generator'); emit('Unloaded text model before Kev'); }
+      catch (e) { emit(`Could not unload text model: ${e.message}`, 'warning'); }
+    }
+    try {
+      classification = await classify(settings, text);
+      emit(`Kev classified: ${classification.intent} (${Math.round(classification.probability * 100)}% top-choice probability)`);
+    } catch (e) {
+      classifiedError = e.message;
+      emit(`Kev unavailable: ${e.message}`, 'warning');
+    }
+  }
+
+  ensureActive();
   const route = stockRequest
     ? {intent:'stock_quote',reason:'Explicit quote request; verified HTTPS market data, no browser or LLM required',source:'Quote guardrail'}
     : brief ? {intent:'daily_briefing',reason:'Explicit read-only daily workflow',source:'Command guardrail'}
     : integrationIntent
-      ? {intent:integrationIntent,reason:'Explicit integration command verified',source:classification?'Kev + guardrail':'Command fallback'}
+      ? {intent:integrationIntent,reason:'Explicit integration command verified',source:'Command guardrail'}
       : routeSafe(text, classification, settings.confidenceThreshold);
   let output;
   let model = settings.kevModel;

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-test-'));
+const temp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-test-')));
 process.env.AEGIS_HOME = temp;
 process.env.AEGIS_DRY_RUN = '1';
 const { detectApp, extractUrl, extractNote, explicitIntent, extractFileQuery } = await import('../src/intent.mjs');

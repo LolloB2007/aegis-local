@@ -1,5 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getSettings, saveSettings, getHistory, clearHistory } from './store.mjs';
@@ -11,6 +12,10 @@ import { initializeStartupContext, getStartupContext } from './startup-context.m
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const MAX_BODY = 48 * 1024;
+const VERSION = (() => {
+  try { return JSON.parse(readFileSync(path.join(publicDir, '..', 'package.json'), 'utf8')).version; }
+  catch { return 'unknown'; }
+})();
 
 async function readBody(request) {
   if (!request.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('Content-Type must be application/json.'), { statusCode: 415 });
@@ -68,7 +73,7 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210, st
       const ready = await readiness;
       if (req.method === 'GET' && url.pathname === '/api/health') {
         return send(res,ready.ok?200:503,{
-          ok:ready.ok,service:'aegis-core',version:'2.1.0-rc.1',
+          ok:ready.ok,service:'aegis-core',version:VERSION,
           startup:ready.ok?{promptLoaded:ready.context.promptLoaded,memoryLoaded:true,memoryCharacters:ready.context.memoryCharacters,loadedAt:ready.context.loadedAt}:
           {error:ready.error}
         });
@@ -164,7 +169,9 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210, st
         }));
       }
       if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
-        const target = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
+        let target;
+        try { target = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname); }
+        catch { return send(res, 400, { error: 'Malformed URL.' }); }
         const resolved = path.resolve(publicDir, `.${target}`);
         if (!resolved.startsWith(publicDir + path.sep)) return send(res, 403, { error: 'Access denied.' });
         const actual = await fs.realpath(resolved).catch(() => null);
@@ -197,6 +204,11 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210, st
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // launchd appends every run to the same log file; timestamp each line.
+  for (const level of ['log', 'warn', 'error']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => original(new Date().toISOString(), ...args);
+  }
   const port = Number(process.env.AEGIS_PORT) || 3210;
   // Strict startup gate: an existing, possibly EMPTY Persistent memory.md
   // must have been successfully read before the assistant listens for requests.
@@ -207,7 +219,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         (ready.promptLoaded?'yes':'fallback')+', persistent memory='+ready.memoryCharacters+' characters');
       const server = createServer({port,startup:Promise.resolve(ready)});
       server.listen(port,'127.0.0.1',()=> {
-        console.log('AEGIS LOCAL 2.1 // Listening at http://127.0.0.1:'+port);
+        console.log(`AEGIS LOCAL ${VERSION} // Listening at http://127.0.0.1:${port}`);
       });
       server.on('error',e=>{console.error('[aegis] Server:',e.message);process.exitCode=1;});
     } catch(e) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Aegis v2.0-rc.1 overlay and persistent menu bar, without Electron."""
+"""Native Aegis overlay and persistent menu bar, without Electron."""
 from __future__ import annotations
 
 import os
@@ -41,6 +41,29 @@ KEYS = {
     "<alt>+<shift>+<esc>": "emergency",
     "<alt>+<shift>+s": "selection",
 }
+
+
+ACCESSIBILITY_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+
+
+def log(message):
+    print(time.strftime("%Y-%m-%d %H:%M:%S") + " [aegis-native] " + message, flush=True)
+
+
+def accessibility_trusted(prompt=False):
+    """True/False for macOS Accessibility trust, or None if it cannot be checked.
+
+    Without trust pynput's event tap starts and stays "alive" but never sees a
+    key press, so liveness alone cannot tell whether shortcuts work.
+    """
+    try:
+        import HIServices
+        if prompt:
+            return bool(HIServices.AXIsProcessTrustedWithOptions(
+                {HIServices.kAXTrustedCheckOptionPrompt: True}))
+        return bool(HIServices.AXIsProcessTrusted())
+    except Exception:
+        return None
 
 
 def label(frame, content, size=12, bold=False):
@@ -85,6 +108,8 @@ class AegisController(NSObject):
         self.history = deque(maxlen=RECENT_LIMIT)
         self.hide_after = None
         self.hotkeys = None
+        self.hotkeys_need_access = False
+        self._prompted_access = False
         self._last_hotkey_attempt = 0.0
         self._last_hotkey_watch = 0.0
         self.voice = None
@@ -195,6 +220,8 @@ class AegisController(NSObject):
         self._menu("Quick text  ⌥⇧Space", "menuText:")
         self._menu("Explain selected text  ⌥⇧S", "menuSelection:")
         self._menu("Restart Keyboard Shortcuts", "restartHotkeys:")
+        self.access_item = self._menu("Grant Accessibility Access…", "grantAccessibility:")
+        self.access_item.setHidden_(True)
         self.menu.addItem_(AK.NSMenuItem.separatorItem())
         self.gaming_item = self._menu("Enter Gaming Mode", "menuGaming:")
         self._menu("Restart Core", "restartCore:")
@@ -234,6 +261,21 @@ class AegisController(NSObject):
         if self.gaming or self.hotkeys:
             return
         self._last_hotkey_attempt = time.monotonic()
+        trusted = accessibility_trusted(prompt=not self._prompted_access)
+        self._prompted_access = True
+        if trusted is False:
+            # Starting the listener now would silently swallow nothing; wait for
+            # the user to grant access, then the watchdog starts it.
+            if not self.hotkeys_need_access:
+                log("Accessibility access missing; shortcuts paused until granted")
+                self._queue("status", "Shortcuts need Accessibility access (menu → Grant Accessibility Access…)")
+            self.hotkeys_need_access = True
+            self._set_access_item(True)
+            return
+        if self.hotkeys_need_access:
+            self._queue("status", "Accessibility granted · shortcuts enabled")
+        self.hotkeys_need_access = False
+        self._set_access_item(False)
         try:
             from pynput.keyboard import GlobalHotKeys
             handlers = {
@@ -242,11 +284,17 @@ class AegisController(NSObject):
             }
             self.hotkeys = GlobalHotKeys(handlers)
             self.hotkeys.start()
-            print("[aegis-native] Global hotkey listener started", flush=True)
+            log("Global hotkey listener started")
         except Exception as error:
             self.hotkeys = None
-            print("[aegis-native] Hotkey startup failure: " + str(error), flush=True)
+            log("Hotkey startup failure: " + str(error))
             self._queue("status", "Global hotkeys unavailable: " + str(error))
+
+    @objc.python_method
+    def _set_access_item(self, visible):
+        item = getattr(self, "access_item", None)
+        if item is not None:
+            item.setHidden_(not visible)
 
     @objc.python_method
     def _stop_hotkeys(self):
@@ -266,16 +314,26 @@ class AegisController(NSObject):
         if now - self._last_hotkey_watch < 5:
             return
         self._last_hotkey_watch = now
+        if self.hotkeys_need_access:
+            # Cheap poll; start shortcuts as soon as access is granted.
+            if accessibility_trusted() is not False:
+                self._start_hotkeys()
+            return
         if self.hotkeys and self.hotkeys.is_alive():
+            if accessibility_trusted() is False:
+                # Access revoked (or reset by an ad-hoc rebuild): the tap is dead weight.
+                log("Accessibility access revoked; stopping shortcuts")
+                self._stop_hotkeys()
+                self._start_hotkeys()
             return
         if now - self._last_hotkey_attempt < 15:
             return
-        print("[aegis-native] Hotkey listener is down; attempting recovery", flush=True)
+        log("Hotkey listener is down; attempting recovery")
         if self.hotkeys:
             try:
                 self._stop_hotkeys()
             except Exception as error:
-                print("[aegis-native] Hotkey cleanup failed: " + str(error), flush=True)
+                log("Hotkey cleanup failed: " + str(error))
                 self.hotkeys = None
         self._start_hotkeys()
         if not self.hotkeys:
@@ -606,11 +664,20 @@ class AegisController(NSObject):
             try:
                 self._stop_hotkeys()
             except Exception as error:
-                print("[aegis-native] Manual hotkey restart error: " + str(error), flush=True)
+                log("Manual hotkey restart error: " + str(error))
                 self.hotkeys = None
         self._start_hotkeys()
         self._set_status("Keyboard shortcuts restarted" if self.hotkeys else
+                         "Shortcuts need Accessibility access for Aegis." if self.hotkeys_need_access else
                          "Shortcuts unavailable. Check macOS privacy settings.")
+
+    def grantAccessibility_(self, _sender):
+        accessibility_trusted(prompt=True)
+        AK.NSWorkspace.sharedWorkspace().openURL_(AK.NSURL.URLWithString_(ACCESSIBILITY_SETTINGS))
+        self._display("In System Settings → Privacy & Security → Accessibility, enable Aegis "
+                      "(remove and re-add it if it is listed but not working). Shortcuts start "
+                      "automatically within a few seconds.", keep=True)
+        self._show()
     def menuGaming_(self, _sender):
         self._toggle_gaming()
 

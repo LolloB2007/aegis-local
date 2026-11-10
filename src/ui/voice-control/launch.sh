@@ -8,7 +8,7 @@ mkdir -p "$HOME/.aegis-local/logs"
 
 if ! curl --silent --fail --max-time 2 "http://127.0.0.1:$PORT/api/bootstrap" >/dev/null; then
   echo "Starting local Aegis server on port $PORT"
-  (cd "$ROOT" && nohup node src/server.mjs > "$HOME/.aegis-local/logs/server.log" 2>&1 &)
+  (cd "$ROOT" && nohup node src/server.mjs >> "$HOME/.aegis-local/logs/server.log" 2>&1 &)
   for _ in $(seq 1 20); do
     if curl --silent --fail --max-time 2 "http://127.0.0.1:$PORT/api/bootstrap" >/dev/null; then break; fi
     sleep 0.5
