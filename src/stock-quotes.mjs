@@ -18,7 +18,7 @@ const BAD_SYMBOLS=new Set(['THE','FOR','OF','IS','AT','NOW','TODAY','STOCK','SHA
 
 export function stockQuoteIntent(message) {
   const text=String(message||'').trim();
-  if(/^(?:open|launch|visit|google|search|look up|find online)\b/i.test(text))return null;
+  if(/^(?:open|launch|visit|browse)\b/i.test(text))return null;
   if(/\b(?:why|forecast|prediction|predict|target price|price target|historical|history|chart|trend|analysis|valuation|dividend|should i buy|how to)\b/i.test(text))return null;
   if(!/\b(?:price|quote|trading at|how much|worth|stock at)\b/i.test(text))return null;
   const isStock=/\b(?:stock|shares?|ticker|quote|trading at)\b/i.test(text);
@@ -54,7 +54,7 @@ export async function getStockQuote(request,{fetchImpl=fetch,now=Date.now(),sign
     if(signal?.aborted)throw new Error('Request cancelled.');
     const response=await fetchImpl(url,{
       method:'GET',redirect:'error',signal:controller.signal,
-      headers:{accept:'application/json','user-agent':'Mozilla/5.0 (Aegis Local; macOS)'}
+      headers:{accept:'application/json','user-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
     });
     if(!response.ok)throw new Error('Market data provider HTTP '+response.status+'.');
     const raw=await response.text();

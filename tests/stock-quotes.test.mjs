@@ -8,9 +8,10 @@ test('stock quote requests route without generating market numbers',()=>{
   assert.equal(stockQuoteIntent('Give me a quote for $MSFT').symbol,'MSFT');
   assert.equal(stockQuoteIntent('How much is UniCredit stock worth?').symbol,'UCG.MI');
   assert.equal(stockQuoteIntent('What is the stock price of Acme Corp?').symbol,null);
+  assert.equal(stockQuoteIntent('Search the web for Apple stock price').symbol,'AAPL');
   assert.equal(stockQuoteIntent("What's the stock price of Apple and Tesla?").ambiguous,true);
   for(const s of ['Why is Apple stock price falling?','Explain stock prices',
-    'Search the web for Apple stock price','Open AAPL stock page','What is the CAPM?'])
+    'Open AAPL stock page','What is the CAPM?'])
     assert.equal(stockQuoteIntent(s),null,s);
 });
 
