@@ -340,8 +340,13 @@ class AegisController(NSObject):
             self.active_cancel.set()
         response = self.active_response.get("stream")
         if response:
-            try: response.close()
-            except OSError: pass
+            # Closing a urllib response can block on a concurrent socket read.
+            # Never freeze AppKit's main thread during emergency dismiss.
+            def interrupt():
+                try: response.close()
+                except OSError: pass
+            threading.Thread(target=interrupt, daemon=True,
+                             name="aegis-cancel-stream").start()
         self.active_response.clear()
         self.active_id = None
         self.active_cancel = None

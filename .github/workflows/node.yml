@@ -39,5 +39,9 @@ jobs:
         run: |
           python -c "import AppKit as a; assert a.NSWindowCollectionBehaviorCanJoinAllSpaces; assert a.NSWindowCollectionBehaviorFullScreenAuxiliary; assert a.NSWindowCollectionBehaviorStationary; assert a.NSPopUpMenuWindowLevel"
           python -c "import sys; sys.path.insert(0,'src/ui/native'); import app; assert app.WIDTH == 402; print('PyObjC v2 import smoke test passed')"
+      - name: Validate panel API constants and NSObject initialization
+        run: |
+          python -c "import AppKit as a; names=['NSBezelStyleRounded','NSNoBorder','NSViewWidthSizable','NSVariableStatusItemLength','NSWindowStyleMaskNonactivatingPanel','NSPasteboardTypeString']; assert all(hasattr(a,n) for n in names), [n for n in names if not hasattr(a,n)]"
+          python -c "import sys; sys.path.insert(0,'src/ui/native'); import app; controller=app.AegisController.alloc().init(); assert controller is not None; print('AppKit controller initialized')"
       - name: Check Python support code on macOS
         run: python -m unittest discover -s scripts -p 'test_*.py' -v
