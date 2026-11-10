@@ -155,7 +155,7 @@ const listScript=`function run(argv) {
  const calendars=calendarName?app.calendars.whose({name:calendarName})():app.calendars();
  const result=[];
  for(const cal of calendars){
-   const events=cal.events.whose({startDate:{_greaterThan:new Date(start),_lessThan:new Date(end)}})();
+   const events=cal.events.whose({startDate:{_lessThan:new Date(end)},endDate:{_greaterThan:new Date(start)}})();
    for(const ev of events.slice(0,40)){
      result.push({calendar:cal.name(),title:ev.summary(),start:ev.startDate().toISOString(),end:ev.endDate().toISOString()});
      if(result.length>=80)break;

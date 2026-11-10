@@ -1,8 +1,72 @@
-# Aegis Local v2.0 — Release Candidate 1
+# Aegis Local v2.1 — Memory & Integrations Release Candidate
 
 Local-first macOS assistant for an M1 MacBook Air with **8 GB RAM**. **No Electron is required.** The default v2 interface is a native PyObjC/AppKit menu-bar controller with a small, transient, top-right floating panel. The Node core remains the sole tool executor and Ollama orchestrator.
 
 > **Release-candidate status:** The native panel, global hotkeys, microphone access, Accessibility permissions, fullscreen Spaces, and LaunchAgent startup must be verified on the target Mac. Passing CI does not prove fullscreen or microphone behavior. See [RC verification checklist](docs/RELEASE_CANDIDATE_CHECKLIST.md).
+
+## v2.1: Boot memory and protected Obsidian
+
+**Two distinct directories, two distinct trust levels:**
+
+| Location | Aegis access |
+|---|---|
+| `~/Documents/Obsidian/claude/` | **Strictly read-only.** Existing vault graph, backlinks, open-task checkboxes and note search. Never edited by Aegis. |
+| `~/Documents/Obsidian/aegis/` | **Aegis-owned Markdown memory.** Reads are bounded. New notes and edits require explicit requests and an approval token. |
+
+**You create your own Markdown files.** Neither GitHub nor Aegis automatically generates templates, context, task lists, daily notes or system prompts. Aegis includes a confirmed Create Markdown Note tool that creates an **empty** `.md` file, never overwriting an existing one.
+
+### Required file before Aegis becomes available
+
+On your Mac, create the directory and an optionally empty note called **`Persistent memory.md`**:
+
+```text
+~/Documents/Obsidian/aegis/Persistent memory.md
+```
+
+The file may contain zero bytes. The core reads it **before accepting requests**; if it is missing or inaccessible, the process reports a boot error and does not serve chat. The menu-bar icon can still exist because it runs in its own small process; create the file locally, then restart the core. Nothing is silently created for you.
+
+The optional `~/Documents/Obsidian/aegis/System Prompt.md` is also read **once at boot** and supplied to Ollama as a bounded `system` message. The core's tool-authorization rules remain in code and cannot be modified by either Markdown file. Changes to the prompt or persistent memory require a core restart to refresh the startup snapshot. On a 3B model, prompt size is capped at 3,800 characters; persistent memory is read (up to 24 KB) but only **small relevant excerpts** enter each conversation.
+
+Optional, personally authored scope notes:
+
+- `To-Do List.md` for explicitly approved tasks.
+- `Routine Tasks.md` for recurring-task descriptions, not automatically scheduled tasks.
+- `Daily/YYYY-MM-DD.md` for an individual daily journal, created only when requested.
+- Other Aegis-owned `.md` files as you need them.
+
+Memory is **not** an autonomous extraction system. No LLM decides what to remember. Aegis's deterministic command parser selects which note may be edited; it previews the exact text, asks for approval, then writes to that note only. It never promotes arbitrary chat messages into persistent memory.
+
+### Example memory commands
+
+```text
+Create Aegis Markdown note: To-Do List.md
+Start my daily note
+List Aegis memory files
+Show Aegis memory
+Aegis remember: I prefer short morning briefings
+Add to Aegis to-do list: Review the internship tracker
+Mark Aegis task done: Review the internship tracker
+Add an Aegis routine: Prepare the calendar every Sunday
+Aegis journal: Worked on the Aegis release
+Search Aegis memory for internship
+```
+
+Each creation or change is **human-confirmed**. Memory edits fail with a helpful message if the target scope note has not yet been created; no hidden templates are generated.
+
+## v2.1: New tools
+
+- **Vault navigation (read-only):** `Show vault backlinks: Projects/Aegis/Aegis Local.md`, `Show vault outgoing links: Index.md`, `Show vault tasks`. Searches actual Markdown links and unchecked task markers. Never alters the personal vault.
+- **Calendar intelligence:** `Find me two free hours this week` and `Check calendar conflicts tomorrow at 10`. Kev routes, the 3B extracts **bounded structured time parameters**, and deterministic code checks retrieved Calendar events. Ambiguous dates or unavailable data produce a request for clarification, **not an invented free slot**. Creating actual events still needs confirmation.
+- **Local documents:** `Index my documents` builds a **private SQLite FTS5** index from approved folders, only after confirmation; `Search my indexed documents for terminal growth` searches that local index. Supports Markdown/text/code, Office ZIP formats and PDF extraction when `pdftotext` is installed. It excludes `Obsidian/aegis`, hidden files, symlinks and oversized inputs. No external embeddings, cloud API or extra AI model.
+- **Developer and GitHub tools (read-only):** `git status: ~/Projects/example`, `git log: ~/Projects/example`, `git diff: ~/Projects/example`, `github prs: ~/Projects/example`, `github ci: ~/Projects/example`. These use fixed Git/gh argument arrays on a validated local repository. GitHub operations require `gh` authenticated on the Mac; they cannot commit, push, delete or run arbitrary commands.
+
+### Dependencies and limits
+
+`python3` is needed for document indexing using the standard-library `sqlite3` module, and the macOS `pdftotext` CLI is optional for PDFs (for example via Poppler). The index lives under `~/.aegis-local/documents.sqlite3`; no index is built automatically at startup.
+
+The 3B generator is used for **response synthesis and clearly bounded parameter extraction**, not deciding what is true or executing arbitrary workflows. Literal search, note writes, free-time calculation, file access and Git operations remain deterministic. Source texts and memory are treated as data, not authority to change permissions.
+
+---
 
 ## The v2 experience
 

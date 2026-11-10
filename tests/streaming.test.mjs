@@ -47,6 +47,9 @@ test('SSE streams model deltas and a complete result from the guarded queue',asy
    res.end('{}');
  });
  await listen(mock);
+ const memoryDir=path.join(home,'Documents','Obsidian','aegis');
+ await fs.mkdir(memoryDir,{recursive:true});
+ await fs.writeFile(path.join(memoryDir,'Persistent memory.md'),'');
  const server=createServer({port:0});
  await listen(server);
  t.after(async()=>{await close(server);await close(mock);await fs.rm(home,{recursive:true,force:true});});

@@ -60,6 +60,9 @@ test('e2e: real HTTP app, mocked Ollama, persisted Markdown notes and model hand
   await listen(mock);
   const mockPort = mock.address().port;
   await saveSettings({ ollamaUrl: `http://127.0.0.1:${mockPort}`, autoReloadKev: true });
+  const memoryDir=path.join(temp,'Documents','Obsidian','aegis');
+  await fs.mkdir(memoryDir,{recursive:true});
+  await fs.writeFile(path.join(memoryDir,'Persistent memory.md'),'');
   const app = createServer({ port: 0 });
   await listen(app);
   t.after(async () => { await close(app); await close(mock); await fs.rm(temp, { recursive: true, force: true }); });

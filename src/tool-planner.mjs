@@ -1,8 +1,9 @@
 // The larger text model extracts parameter data, not the identity of the tool.
 import { toolSchema } from './integrations.mjs';
 import { DESKTOP_SCHEMAS } from './desktop-tools.mjs';
+import { CALENDAR_SCHEMAS } from './calendar-planning.mjs';
 export async function planIntegration(settings, intent, request, {now=new Date()}={}) {
-  const schema=toolSchema(intent) || DESKTOP_SCHEMAS[intent];
+  const schema=toolSchema(intent) || DESKTOP_SCHEMAS[intent] || CALENDAR_SCHEMAS[intent];
   if(!schema)return {};
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),95000);
@@ -17,6 +18,8 @@ export async function planIntegration(settings, intent, request, {now=new Date()
       'Vault paths are relative to the vault root, retain .md. Never return absolute paths.',
       'Interpret relative dates using the supplied local timestamp and UTC offset; output ISO8601 with explicit offset.',
       'If the user states an unambiguous event start but no duration, use exactly 60 minutes.',
+      'For calendar_free use an unambiguous bounded date interval; durationMinutes must be a string integer. Do not invent a day or timezone.',
+      'Working hours default to 09:00 through 19:00 if the request does not specify them.',
       'If any field cannot be reliably extracted, return the empty string. Return only JSON.'
     ].join('\n');
     const response=await fetch(`${settings.ollamaUrl}/api/chat`,{

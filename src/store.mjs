@@ -18,6 +18,7 @@ export const defaults = Object.freeze({
   historyCount: 12,
   searchRoots: ['~/Documents', '~/Desktop', '~/Downloads'],
   notesFolder: '~/Documents/Aegis Notes',
+  memoryRoot: '~/Documents/Obsidian/aegis',
   vaultRoot: '~/Documents/Obsidian/claude',
   calendarName: '',
   reminderListName: ''
@@ -61,7 +62,12 @@ export function validateSettings(raw) {
   if (typeof v.notesFolder !== 'string' || !inUserHome(v.notesFolder)) {
     throw new Error('Notes folder must be inside your home folder.');
   }
-  if (typeof v.vaultRoot !== 'string' || !inUserHome(v.vaultRoot)) {
+  if (typeof v.memoryRoot !== 'string' ||
+      path.resolve(expandHome(v.memoryRoot)) !== path.resolve(home,'Documents','Obsidian','aegis')) {
+    throw new Error('Aegis memory directory is fixed at ~/Documents/Obsidian/aegis.');
+  }
+  if (typeof v.vaultRoot !== 'string' || !inUserHome(v.vaultRoot) ||
+      path.resolve(expandHome(v.vaultRoot)) === path.resolve(expandHome(v.memoryRoot))) {
     throw new Error('Vault folder must be inside your home directory.');
   }
   for (const key of ['calendarName', 'reminderListName']) {
