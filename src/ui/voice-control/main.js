@@ -201,7 +201,6 @@ async function generateLlmContent(prompt) {
       resolve({ success: false, error: err.message });
     });
     
-    // Get default model or use llama3.2:3b
     const model = process.env.OLLAMA_MODEL || 'llama3.2:3b';
     
     req.write(JSON.stringify({
@@ -211,6 +210,21 @@ async function generateLlmContent(prompt) {
       keep_alive: 0
     }));
     req.end();
+  });
+}
+
+async function executeOsascript(script) {
+  return new Promise((resolve) => {
+    const proc = spawn('/usr/bin/osascript', ['-e', script]);
+    let stdout = '';
+    let stderr = '';
+    
+    proc.stdout.on('data', data => { stdout += data.toString(); });
+    proc.stderr.on('data', data => { stderr += data.toString(); });
+    
+    proc.on('close', (code) => {
+      resolve({ success: code === 0, output: stdout.trim(), error: stderr.trim() });
+    });
   });
 }
 
@@ -231,6 +245,7 @@ const toolHandlers = {
     return await executeOsascript(script);
   },
   
+  // Email tools
   'send-email': async (params) => {
     const recipient = params.to || params.recipient;
     const subject = params.subject || 'Email from Voice Control';
@@ -238,7 +253,6 @@ const toolHandlers = {
     
     if (!recipient) return { success: false, error: 'No recipient specified' };
     
-    // If body is empty, we need to generate it
     if (!body && params.generate_body) {
       const genResult = await generateLlmContent(params.generate_body);
       if (genResult.success) {
@@ -250,7 +264,6 @@ const toolHandlers = {
       return { success: false, error: 'No email content' };
     }
     
-    // Open Outlook with email draft
     const script = `
       tell application "Microsoft Outlook"
         make new outgoing message with properties {subject:"${subject}", content:"${body.replace(/"/g, '\\"')}"}
@@ -260,11 +273,7 @@ const toolHandlers = {
     return await executeOsascript(script);
   },
   
-  'transcribe': async (params) => {
-    // This is a self-referential tool - return the transcription
-    return { success: true, type: 'transcription', data: params.text || '' };
-  },
-  
+  // File tools
   'sort-file': async (params) => {
     const filePath = params.path || params.file;
     const order = params.order || 'asc';
@@ -293,6 +302,7 @@ const toolHandlers = {
     }
   },
   
+  // Desktop tools
   'reorganize-desktop': async (params) => {
     const action = params.action || 'clean';
     
@@ -306,7 +316,7 @@ const toolHandlers = {
     }
   },
   
-  // --- Calendar Tools ---
+  // Calendar tools
   'create-calendar-event': async (params) => {
     const title = params.title || params.name;
     const startDate = params.start || params.date;
@@ -316,7 +326,6 @@ const toolHandlers = {
     if (!title) return { success: false, error: 'No event title specified' };
     if (!startDate) return { success: false, error: 'No start date specified' };
     
-    // Parse date - supports natural language dates
     const script = `
       tell application "Calendar"
         tell calendar "${calendar}"
@@ -336,7 +345,6 @@ const toolHandlers = {
     
     if (!participants) return { success: false, error: 'No participants specified' };
     
-    // Use LLM to generate calendar event description
     const genPrompt = `Create a calendar event for a meeting titled "${title}" with ${participants}. 
 The meeting is ${when} and will last ${duration} hour(s). 
 Generate the iCal-like format with all details needed for Apple Calendar.`;
@@ -346,7 +354,6 @@ Generate the iCal-like format with all details needed for Apple Calendar.`;
       return { success: false, error: `Failed to generate meeting details: ${genResult.error}` };
     }
     
-    // Parse LLM output and create event
     return await toolHandlers['create-calendar-event']({
       title,
       start: when,
@@ -370,28 +377,186 @@ Generate the iCal-like format with all details needed for Apple Calendar.`;
         end tell
       end tell`;
     return await executeOsascript(script);
+  },
+  
+  // Clipboard tools
+  'clipboard-read': async () => {
+    return new Promise((resolve) => {
+      const script = 'the clipboard as «class utf8»';
+      const proc = spawn('/usr/bin/osascript', ['-e', script]);
+      let stdout = '';
+      
+      proc.stdout.on('data', data => { stdout += data.toString(); });
+      proc.on('close', (code) => {
+        if (code === 0) {
+          resolve({ success: true, content: stdout.trim() });
+        } else {
+          resolve({ success: false, error: 'Failed to read clipboard' });
+        }
+      });
+    });
+  },
+  
+  'clipboard-write': async (params) => {
+      const content = params.content || params.text || params.value || '';
+      const script = `set the clipboard to "${content.replace(/"/g, '\\"')}"`;
+    const result = await executeOsascript(script);
+    if (result.success) {
+      return { success: true, message: 'Content copied to clipboard' };
+    }
+    return result;
+  },
+  
+  // Shell execution (with safety wrapper)
+  'shell-execute': async (params) => {
+    const command = params.command || params.cmd;
+    if (!command) return { success: false, error: 'No command specified' };
+    
+    const allowed = [
+      'ls', 'cat', 'head', 'tail', 'which', 'pwd', 'date',
+      'open', 'osascript', 'say', 'pbcopy', 'pbpaste',
+      'du', 'df', 'free', 'top', 'networksetup', 'ipconfig'
+    ];
+    
+    const cmdBase = command.split(' ')[0];
+    const isAllowed = allowed.some(allowedCmd => {
+      if (allowedCmd.includes(' ')) return allowedCmd === cmdBase;
+      return cmdBase === allowedCmd || cmdBase.endsWith('/' + allowedCmd) || cmdBase.includes(allowedCmd);
+    });
+    
+    if (!isAllowed) {
+      return { success: false, error: 'Command not allowed: ' + cmdBase };
+    }
+    
+    return new Promise((resolve) => {
+      const proc = spawn('bash', ['-c', command]);
+      const timeout = setTimeout(() => {
+        proc.kill();
+        resolve({ success: false, error: 'Command timed out (5s limit)' });
+      }, 5000);
+      
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', data => { stdout += data.toString(); });
+      proc.stderr.on('data', data => { stderr += data.toString(); });
+      
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        resolve({ 
+          success: code === 0, 
+          output: stdout.trim(), 
+          error: stderr.trim() || undefined 
+        });
+      });
+    });
+  },
+  
+  // System info tools
+  'get-battery-status': async () => {
+    const script = `
+      tell application "System Events"
+        get value of attribute "preparingShopper"
+      end tell`;
+    
+    // Use pmset for battery info
+    return new Promise((resolve) => {
+      spawn('bash', ['-c', 'pmset -g batt | grep -o "[0-9]*%" | head -1'], {
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).stdout.on('data', (data) => {
+        const percent = data.toString().trim();
+        spawn('bash', ['-c', 'pmset -g batt | grep -q "discharging" && echo "discharging" || echo "charging"'], {
+          stdio: ['ignore', 'pipe', 'ignore']
+        }).stdout.on('data', (statusData) => {
+          const status = statusData.toString().trim();
+          spawn('bash', ['-c', 'system_profiler SPPowerDataType | grep "Condition" | head -1'], {
+            stdio: ['ignore', 'pipe', 'ignore']
+          }).stdout.on('data', (condData) => {
+            resolve({ 
+              success: true, 
+              battery: {
+                percent: parseInt(percent) || 0,
+                status: status,
+                condition: condData.toString().trim()
+              }
+            });
+          });
+        });
+      });
+    });
+  },
+  
+  'get-network-info': async () => {
+    return new Promise((resolve) => {
+      const results = {};
+      
+      // Get IP
+      spawn('bash', ['-c', 'ipconfig getifaddr en0 2>/dev/null || echo "no-ip"'], {
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).stdout.on('data', (data) => {
+        results.ip = data.toString().trim();
+        
+        // Get WiFi status
+        spawn('bash', ['-c', 'networksetup -getairportpower en0 2>/dev/null || echo "unknown"'], {
+          stdio: ['ignore', 'pipe', 'ignore']
+        }).stdout.on('data', (wifiData) => {
+          const wifiInfo = wifiData.toString().trim();
+          const wifiOn = wifiInfo.includes('On');
+          
+          // Get SSID if connected
+          spawn('bash', ['-c', 'networksetup -getairportnetwork en0 2>/dev/null | sed "s/Yours is: //" || echo "not-connected"'], {
+            stdio: ['ignore', 'pipe', 'ignore']
+          }).stdout.on('data', (ssidData) => {
+            const ssid = ssidData.toString().trim();
+            
+            resolve({
+              success: true,
+              network: {
+                ip: results.ip,
+                wifi: wifiOn ? 'on' : 'off',
+                ssid: ssid.includes('not-connected') ? null : ssid
+              }
+            });
+          });
+        });
+      });
+    });
+  },
+  
+  'set-volume': async (params) => {
+    const level = parseInt(params.level) || params.value || 50;
+    if (level < 0 || level > 100) return { success: false, error: 'Volume must be 0-100' };
+    
+    const script = `tell application "System Events" to set volume output volume ${level}`;
+    const result = await executeOsascript(script);
+    
+    if (result.success) {
+      return { success: true, message: 'Volume set to ' + level + '%' };
+    }
+    return result;
+  },
+  
+  'set-brightness': async (params) => {
+    const level = parseInt(params.level) || params.value || 50;
+    if (level < 0 || level > 100) return { success: false, error: 'Brightness must be 0-100' };
+    
+    const script = `tell application "System Events" to set screen brightness of every display to ${level / 100}`;
+    const result = await executeOsascript(script);
+    
+    if (result.success) {
+      return { success: true, message: 'Brightness set to ' + level + '%' };
+    }
+    return result;
+  },
+  
+  // Transcribe tool (self-referential)
+  'transcribe': async (params) => {
+    return { success: true, type: 'transcription', data: params.text || '' };
   }
 };
-
-async function executeOsascript(script) {
-  return new Promise((resolve) => {
-    const proc = spawn('/usr/bin/osascript', ['-e', script]);
-    let stdout = '';
-    let stderr = '';
-    
-    proc.stdout.on('data', data => { stdout += data.toString(); });
-    proc.stderr.on('data', data => { stderr += data.toString(); });
-    
-    proc.on('close', (code) => {
-      resolve({ success: code === 0, output: stdout.trim(), error: stderr.trim() });
-    });
-  });
-}
 
 // Run tool chain from transcription
 async function runToolChain(text) {
   if (!isToolCall(text)) {
-    // Not a tool call, send to Aegis normally
     await sendToAegis(text);
     return;
   }
@@ -413,12 +578,10 @@ async function runToolChain(text) {
     return;
   }
   
-  // If params needs generation, use LLM
   if (params.generate_from) {
     showOverlayWithText(`Generating: ${params.generate_from}`);
     const genResult = await generateLlmContent(params.generate_from);
     if (genResult.success) {
-      // Merge generated content into params
       Object.assign(params, genResult.content);
     } else {
       await sendToAegis(`Failed to generate: ${genResult.error}`);
@@ -426,11 +589,9 @@ async function runToolChain(text) {
     }
   }
   
-  // Execute tool
   showOverlayWithText(`Executing: ${toolName}`);
   const result = await handler(params);
   
-  // Send result to Aegis for user feedback
   if (result.success) {
     await sendToAegis(`Tool "${toolName}" completed: ${JSON.stringify(result)}`);
   } else {
@@ -583,7 +744,6 @@ ipcMain.on('stop-recording', () => stopRecording());
 
 // --- Tool Chain IPC Handlers ---
 
-// Expose tool execution to overlay
 ipcMain.handle('execute-tool', async (event, toolDef) => {
   const toolName = toolDef.tool;
   const params = toolDef.params || {};
@@ -596,12 +756,10 @@ ipcMain.handle('execute-tool', async (event, toolDef) => {
   return await handler(params);
 });
 
-// Generate content via LLM
 ipcMain.handle('generate-content', async (event, prompt) => {
   return await generateLlmContent(prompt);
 });
 
-// List available tools
 ipcMain.handle('list-tools', async () => {
   return {
     success: true,
@@ -612,6 +770,7 @@ ipcMain.handle('list-tools', async () => {
       file: ['sort-file', 'delete-file'],
       desktop: ['reorganize-desktop'],
       calendar: ['create-calendar-event', 'schedule-meeting', 'list-calendar-events'],
+      system: ['clipboard-read', 'clipboard-write', 'shell-execute', 'get-battery-status', 'get-network-info', 'set-volume', 'set-brightness'],
       other: ['transcribe']
     }
   };
