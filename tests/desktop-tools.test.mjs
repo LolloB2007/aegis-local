@@ -38,7 +38,7 @@ test('strict argument validation',()=>{
  assert.throws(()=>validateDesktopArgs('app_quit',{app:'../../bin/sh'}),/allowlist/);
  assert.throws(()=>validateDesktopArgs('email_send',{to:'a@b.com,c@d.com',subject:'x',body:'text'}),/recipient/);
  assert.throws(()=>validateDesktopArgs('file_trash',{path:'/etc/passwd'}),/outside your home/);
- assert.throws(()=>validateDesktopArgs('file_trash',{path:'~/Documents/../.ssh/id_rsa'}),/Hidden\\/system/);
+ assert.throws(()=>validateDesktopArgs('file_trash',{path:'~/Documents/../.ssh/id_rsa'}),/protected/);
  assert.throws(()=>validateDesktopArgs('system_diagnostic',{kind:'cat /etc/passwd'}),/Unsupported diagnostic/);
 });
 test('safe previews, vault protections, symlink escapes and dry run executor',async t=>{
