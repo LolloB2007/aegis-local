@@ -107,6 +107,7 @@ class AegisController(NSObject):
         # Show no window at login. Only the status-bar process is resident.
         self._queue("status", "Aegis ready. Neither AI model is loaded by the UI.")
 
+    @objc.python_method
     def _build_panel(self):
         mask = (
             AK.NSWindowStyleMaskTitled |
@@ -176,6 +177,7 @@ class AegisController(NSObject):
         self.cancel_button.setHidden_(True)
         self.panel.orderOut_(None)
 
+    @objc.python_method
     def _build_status_menu(self):
         self.status_item = AK.NSStatusBar.systemStatusBar().statusItemWithLength_(
             AK.NSVariableStatusItemLength)
@@ -197,6 +199,7 @@ class AegisController(NSObject):
         self._menu("Quit Completely", "quitCompletely:")
         self.status_item.setMenu_(self.menu)
 
+    @objc.python_method
     def _menu(self, title, selector):
         item = AK.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
         if selector:
@@ -204,6 +207,7 @@ class AegisController(NSObject):
         self.menu.addItem_(item)
         return item
 
+    @objc.python_method
     def _queue(self, event, value=None, request_id=None):
         try:
             self.events.put_nowait((event, value, request_id))
@@ -211,6 +215,7 @@ class AegisController(NSObject):
             # Never block a microphone/hotkey OS callback or an Ollama stream.
             pass
 
+    @objc.python_method
     def _reset_voice(self):
         if self.voice:
             self.voice.shutdown()
@@ -219,6 +224,7 @@ class AegisController(NSObject):
             on_state=lambda state: self._queue("voice_state", state)
         )
 
+    @objc.python_method
     def _start_hotkeys(self):
         if self.gaming or self.hotkeys:
             return
@@ -234,6 +240,7 @@ class AegisController(NSObject):
             self.hotkeys = None
             self._queue("status", "Global hotkeys unavailable: " + str(error))
 
+    @objc.python_method
     def _stop_hotkeys(self):
         if self.hotkeys:
             try:
@@ -241,6 +248,7 @@ class AegisController(NSObject):
             finally:
                 self.hotkeys = None
 
+    @objc.python_method
     def _screen(self):
         pointer = AK.NSEvent.mouseLocation()
         for screen in AK.NSScreen.screens():
@@ -250,6 +258,7 @@ class AegisController(NSObject):
                 return screen
         return AK.NSScreen.mainScreen() or AK.NSScreen.screens()[0]
 
+    @objc.python_method
     def _show(self, text_focus=False):
         if self.gaming:
             return
@@ -266,20 +275,24 @@ class AegisController(NSObject):
             self.app.activateIgnoringOtherApps_(True)
             self.panel.makeFirstResponder_(self.text_input)
 
+    @objc.python_method
     def _set_status(self, status):
         self.state_label.setStringValue_(str(status)[:150])
 
+    @objc.python_method
     def _toggle_approval(self, visible):
         self.approve_button.setHidden_(not visible)
         self.reject_button.setHidden_(not visible)
         self.edit_button.setHidden_(not visible)
 
+    @objc.python_method
     def _display(self, text, keep=False):
         self.output = str(text)[-100000:]
         self.textview.setString_(self.output)
         if keep or self.pinned:
             self.hide_after = None
 
+    @objc.python_method
     def _start_request(self, message):
         message = str(message).strip()
         if not message or self.gaming:
@@ -320,6 +333,7 @@ class AegisController(NSObject):
                 self._queue("request_finished", None, request_id)
         threading.Thread(target=worker, daemon=True, name="aegis-request").start()
 
+    @objc.python_method
     def _cancel_active(self):
         if self.active_cancel:
             self.active_cancel.set()
@@ -333,6 +347,7 @@ class AegisController(NSObject):
         self.busy = False
         self.cancel_button.setHidden_(True)
 
+    @objc.python_method
     def _approve_pending(self, approve):
         if self.gaming or not self.panel.isVisible():
             return
@@ -344,6 +359,7 @@ class AegisController(NSObject):
         self._toggle_approval(False)
         self._start_request(("confirm " if approve else "cancel ") + token)
 
+    @objc.python_method
     def _toggle_gaming(self):
         self.gaming = not self.gaming
         save_gaming(self.gaming)
