@@ -91,7 +91,7 @@ async function startRecording() {
   ], { cwd: __dirname });
   
   audioProcess.on('close', async (code) => {
-    if (code === 0 && audioFile) {
+    if (audioFile && fs.existsSync(audioFile) && fs.statSync(audioFile).size > 44) {
       console.log('Recording finished, processing...');
       await processAudio();
     }
@@ -121,23 +121,23 @@ async function processAudio() {
       console.log('Transcription:', transcript.text);
       showOverlayWithText(transcript.text);
       await sendToAegis(transcript.text);
-      fs.unlinkSync(audioFile);
     } else {
       showOverlayWithText('');
     }
   } catch (err) {
     console.error('Processing error:', err);
   } finally {
+    if (audioFile && fs.existsSync(audioFile)) fs.unlinkSync(audioFile);
     audioFile = null;
   }
 }
 
 async function transcribeAudio(filePath) {
   return new Promise((resolve) => {
-    const parakeetPath = '/Users/lorenzobarbagelata/.local/bin/parakeet-transcribe';
+    const parakeetPath = process.env.PARAKEET_TRANSCRIBE || path.join(os.homedir(), '.local/bin/parakeet-transcribe');
     
     if (fs.existsSync(parakeetPath)) {
-      const outputPath = path.join(os.tmpdir(), 'aegis_transcript.txt');
+      const outputPath = path.join(os.tmpdir(), `aegis_transcript_${process.pid}_${Date.now()}.txt`);
       const proc = spawn(parakeetPath, ['--format', 'text', '--output', outputPath, filePath]);
       
       proc.stderr.on('data', () => {});
@@ -283,8 +283,7 @@ const toolHandlers = {
     
     const content = fs.readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter(l => l.trim());
-    if (order === 'desc') lines.reverse();
-    lines.sort((a, b) => a.localeCompare(b));
+    lines.sort((a, b) => order === 'desc' ? b.localeCompare(a) : a.localeCompare(b));
     fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
     
     return { success: true, message: `Sorted ${filePath}` };
@@ -556,6 +555,12 @@ Generate the iCal-like format with all details needed for Apple Calendar.`;
 
 // Run tool chain from transcription
 async function runToolChain(text) {
+  // Voice commands are always routed through the core executor. The legacy
+  // JSON tool-chain bypassed its allowlist and allowed destructive operations.
+  if (isToolCall(text)) {
+    showOverlayWithText('Direct JSON tool execution is disabled. Use natural-language commands.');
+    return;
+  }
   if (!isToolCall(text)) {
     await sendToAegis(text);
     return;
@@ -637,7 +642,6 @@ async function sendToAegis(text) {
 // --- Tray Menu ---
 
 function createTray() {
-  const { Tray } = require('electron');
   const iconPath = path.join(__dirname, 'resources', 'aegis-icon.png');
   
   trayInstance = new Tray(iconPath);
@@ -745,6 +749,11 @@ ipcMain.on('stop-recording', () => stopRecording());
 // --- Tool Chain IPC Handlers ---
 
 ipcMain.handle('execute-tool', async (event, toolDef) => {
+  // The renderer is not trusted to request privileged OS operations directly.
+  const permittedReadOnly = new Set(['get-battery-status', 'get-network-info', 'transcribe']);
+  if (!toolDef || !permittedReadOnly.has(toolDef.tool)) {
+    return { success: false, error: 'Direct tool execution disabled; use the Aegis assistant API.' };
+  }
   const toolName = toolDef.tool;
   const params = toolDef.params || {};
   const handler = toolHandlers[toolName];
@@ -756,9 +765,7 @@ ipcMain.handle('execute-tool', async (event, toolDef) => {
   return await handler(params);
 });
 
-ipcMain.handle('generate-content', async (event, prompt) => {
-  return await generateLlmContent(prompt);
-});
+ipcMain.handle('generate-content', async () => ({ success: false, error: 'Direct model access disabled; use the Aegis assistant API.' }));
 
 ipcMain.handle('list-tools', async () => {
   return {
