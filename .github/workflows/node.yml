@@ -52,4 +52,14 @@ jobs:
             exit 1
           fi
       - name: Check Python support code on macOS
-        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if python -m unittest discover -s scripts -p 'test_*.py' -v > mac-tests.txt 2>&1; then
+            cat mac-tests.txt
+          else
+            cat mac-tests.txt
+            { echo 'macOS Python unittest diagnostic:'; echo '~~~'; tail -n 180 mac-tests.txt; echo '~~~'; } > mac-test-report.md
+            gh pr comment 4 --body-file mac-test-report.md || true
+            exit 1
+          fi
