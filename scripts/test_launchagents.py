@@ -33,6 +33,10 @@ class LaunchAgentTests(unittest.TestCase):
         )
         self.assertIn("voice.log", voice["StandardOutPath"])
         self.assertEqual(voice["EnvironmentVariables"]["AEGIS_PORT"], "3210")
+        native = installer.make_plist("com.aegis.local.native", ["/some/python", "/some/app.py"], native=True)
+        self.assertEqual(native["ProcessType"], "Interactive")
+        self.assertIn("native.log", native["StandardOutPath"])
+        self.assertEqual(native["EnvironmentVariables"]["AEGIS_ROOT"], str(installer.ROOT))
 
     def test_voice_daemon_can_import_without_pynput(self):
         module = load("headless_voice", "src/ui/voice-control/headless_voice.py")

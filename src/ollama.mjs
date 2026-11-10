@@ -139,7 +139,7 @@ export async function classify(settings, userText) {
   };
 }
 
-export async function generate(settings, history) {
+export async function generate(settings, history, { onDelta = null, signal = null } = {}) {
   const start = Date.now();
   const systemPrompt = `You are Aegis, a concise, helpful personal assistant running LOCALLY on a user's Mac.\n` +
     `You may explain, reason and draft text, but you DO NOT have direct access to the user's computer and cannot claim you performed actions.\n` +
@@ -152,13 +152,69 @@ export async function generate(settings, history) {
     { role: 'system', content: systemPrompt },
     ...history.slice(-settings.historyCount).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }))
   ];
-  const result = await post(settings, '/api/chat', {
-    model: settings.llmModel,
-    messages,
-    stream: false,
+  const request = {
+    model: settings.llmModel, messages,
+    stream: Boolean(onDelta),
     keep_alive: settings.autoUnload ? 0 : '5m',
     options: { num_ctx: settings.contextTokens, temperature: 0.5 }
-  }, 180000);
+  };
+  let result;
+  if (!onDelta) {
+    result = await post(settings, '/api/chat', request, 180000);
+  } else {
+    // Ollama /api/chat emits newline-delimited JSON while stream=true.
+    // Forward text incrementally to the native overlay without buffering an entire answer.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error('Generation timed out')), 180000);
+    const abort = () => controller.abort(signal?.reason ?? new Error('Cancelled'));
+    if (signal?.aborted) abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    let response;
+    try {
+      response = await fetch(`${settings.ollamaUrl}/api/chat`, {
+        method: 'POST', headers: {'content-type':'application/json'},
+        body: JSON.stringify(request), signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`Ollama generation failed (HTTP ${response.status}): ${(await response.text()).slice(0,200)}`);
+      if (!response.body) throw new Error('Ollama response has no stream.');
+      const decoder = new TextDecoder();
+      let buffer = '', content = '', last = {};
+      for await (const bytes of response.body) {
+        if (signal?.aborted) throw new Error('Request cancelled');
+        buffer += decoder.decode(bytes, { stream: true });
+        if (buffer.length > 100000) throw new Error('Ollama streaming frame exceeded safety limit.');
+        while (buffer.includes('\n')) {
+          const newline = buffer.indexOf('\n');
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          const message = JSON.parse(line);
+          if (message.error) throw new Error(String(message.error).slice(0,300));
+          const delta = message.message?.content || '';
+          if (delta) {
+            content += delta;
+            if (content.length > 150000) throw new Error('Generated response is too long.');
+            onDelta(delta);
+          }
+          if (message.done) last = message;
+        }
+      }
+      if (buffer.trim()) {
+        const message = JSON.parse(buffer.trim());
+        if (message.error) throw new Error(String(message.error).slice(0,300));
+        const delta = message.message?.content || '';
+        if (delta) { content += delta; onDelta(delta); }
+        if (message.done) last = message;
+      }
+      result = { ...last, message: { role: 'assistant', content } };
+    } catch (error) {
+      if (signal?.aborted) throw new Error('Request cancelled');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    }
+  }
   return {
     content: result.message?.content?.trim() || '(The model returned an empty response.)',
     durationMs: Date.now() - start,

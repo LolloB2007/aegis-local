@@ -75,7 +75,7 @@ def submit_transcript(text: str) -> dict:
 
 
 class HeadlessVoice:
-    def __init__(self) -> None:
+    def __init__(self, on_transcript=None, on_state=None) -> None:
         self.lock = threading.Lock()
         self.recording: subprocess.Popen | None = None
         self.record_dir: Path | None = None
@@ -83,6 +83,8 @@ class HeadlessVoice:
         self.processing = False
         self.last_press = 0.0
         self.stopped = False
+        self.on_transcript = on_transcript
+        self.on_state = on_state
 
     def toggle(self) -> None:
         with self.lock:
@@ -104,6 +106,7 @@ class HeadlessVoice:
                     daemon=True, name="aegis-transcribe",
                 ).start()
                 notice("Recording stopped, transcribing")
+                if self.on_state: self.on_state('transcribing')
                 return
             ffmpeg = shutil.which("ffmpeg")
             if ffmpeg is None:
@@ -129,7 +132,10 @@ class HeadlessVoice:
                 return
             threading.Thread(target=self._watch_recording, args=(self.recording,), daemon=True, name="aegis-recording-monitor").start()
             notice(f"Recording started (device {device}); press Option+Space to stop")
-            mac_notification("Recording. Press Option+Space again to stop.")
+            if self.on_state:
+                self.on_state('listening')
+            else:
+                mac_notification("Recording. Press Option+Space again to stop.")
 
     def _watch_recording(self, proc: subprocess.Popen) -> None:
         proc.wait()
@@ -145,6 +151,7 @@ class HeadlessVoice:
                 daemon=True, name="aegis-transcribe",
             ).start()
             notice("Recording stopped automatically; transcribing")
+            if self.on_state: self.on_state('transcribing')
 
     def _finish(self, proc: subprocess.Popen, path: Path | None, directory: Path | None) -> None:
         try:
@@ -162,9 +169,13 @@ class HeadlessVoice:
             spoken = transcribe(path, directory / "transcript.txt")
             if not spoken:
                 notice("No speech recognized")
-                mac_notification("No speech detected.")
+                if self.on_state: self.on_state('no_speech')
+                else: mac_notification("No speech detected.")
                 return
             notice(f"Transcribed {len(spoken)} characters")
+            if self.on_transcript:
+                self.on_transcript(spoken)
+                return
             result = submit_transcript(spoken)
             response_text = str(result.get("response", ""))
             notice(f"Aegis [{result.get('action', '?')}]: {response_text[:550]}")
@@ -174,7 +185,8 @@ class HeadlessVoice:
                 mac_notification((response_text or "Aegis completed the request")[:120])
         except (RuntimeError, OSError, ValueError, HTTPError, URLError, subprocess.TimeoutExpired) as exc:
             notice(f"Voice request failed: {exc}")
-            mac_notification("Voice request failed. See ~/.aegis-local/logs/voice.log")
+            if self.on_state: self.on_state('error: ' + str(exc))
+            else: mac_notification("Voice request failed. See ~/.aegis-local/logs/voice.log")
         finally:
             if directory is not None:
                 shutil.rmtree(directory, ignore_errors=True)

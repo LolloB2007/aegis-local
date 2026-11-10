@@ -47,11 +47,34 @@ function securityCheck(req, port) {
 
 export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } = {}) {
   let work = Promise.resolve();
+  let activeJobs = 0;
+  let lastWorkAt = Date.now();
+  let lastIdleSweep = 0;
+  const IDLE_MODEL_UNLOAD_MS = 120000; // the menu stays resident, not the LLMs
+
   const enqueue = job => {
-    const next = work.then(job);
+    const next = work.then(async () => {
+      activeJobs++;
+      try { return await job(); }
+      finally { activeJobs--; lastWorkAt = Date.now(); }
+    });
     work = next.catch(() => undefined);
     return next;
   };
+  const idleTimer = setInterval(() => {
+    const now = Date.now();
+    if (activeJobs || now-lastWorkAt < IDLE_MODEL_UNLOAD_MS || now-lastIdleSweep < IDLE_MODEL_UNLOAD_MS) return;
+    lastIdleSweep = now;
+    enqueue(async () => {
+      const settings = await getSettings();
+      for (const [name,type] of [[settings.llmModel,'generator'],[settings.kevModel,'decision']]) {
+        try { await unloadModel(settings,name,type); }
+        catch(error) { console.warn('[aegis] idle unload:',error.message); }
+      }
+    }).catch(error=>console.warn('[aegis] idle sweep:',error.message));
+  },30000);
+  idleTimer.unref();
+
   const server = http.createServer(async (req, res) => {
     try {
       securityCheck(req, server.address()?.port || port);
@@ -60,9 +83,54 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } =
         const [settings, history] = await Promise.all([getSettings(), getHistory()]);
         return send(res, 200, { settings, history });
       }
+      if (req.method === 'GET' && url.pathname === '/api/health') {
+        return send(res, 200, {ok:true, service:'aegis-core', version:'2.0.0-rc.1'});
+      }
       if (req.method === 'GET' && url.pathname === '/api/status') {
         const settings = await getSettings();
         return send(res, 200, await getOllamaStatus(settings));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/stream') {
+        const { message } = await readBody(req);
+        if (typeof message !== 'string' || !message.trim() || message.length > 12000)
+          return send(res,400,{error:'Enter a request between 1 and 12,000 characters.'});
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-store, no-transform',
+          'connection': 'keep-alive',
+          'x-content-type-options':'nosniff',
+          'x-accel-buffering':'no'
+        });
+        const controller = new AbortController();
+        res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+        const event = (type, value) => {
+          if (controller.signal.aborted || res.writableEnded || res.destroyed) return;
+          res.write(`event: ${type}\ndata: ${JSON.stringify(value)}\n\n`);
+        };
+        const heartbeat = setInterval(() => {
+          if (!controller.signal.aborted && !res.writableEnded && !res.destroyed) res.write(': keepalive\n\n');
+        }, 12000);
+        event('phase', {state:'queued',label:'Waiting for the local model queue'});
+        try {
+          const result = await enqueue(() => {
+            if (controller.signal.aborted) throw new Error('Request cancelled');
+            event('phase',{state:'running',label:'Kev deciding how to route the request'});
+            return runTurn(message, {
+              signal:controller.signal,
+              onStep:step=>event('step',step),
+              onDelta:text=>event('delta',{text})
+            });
+          });
+          event('result', result);
+          event('done',{ok:true});
+        } catch(e) {
+          event('error',{error:String(e.message||e).slice(0,500)});
+          event('done',{ok:false});
+        } finally {
+          clearInterval(heartbeat);
+          if(!res.writableEnded) res.end();
+        }
+        return;
       }
       if (req.method === 'POST' && url.pathname === '/api/chat') {
         const { message } = await readBody(req);
@@ -129,6 +197,7 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } =
       else res.end();
     }
   });
+  server.on('close', () => clearInterval(idleTimer));
   return server;
 }
 
