@@ -60,6 +60,9 @@ test('e2e: real HTTP app, mocked Ollama, persisted Markdown notes and model hand
   await listen(mock);
   const mockPort = mock.address().port;
   await saveSettings({ ollamaUrl: `http://127.0.0.1:${mockPort}`, autoReloadKev: true });
+  const memoryDir=path.join(temp,'Documents','Obsidian','aegis');
+  await fs.mkdir(memoryDir,{recursive:true});
+  await fs.writeFile(path.join(memoryDir,'Persistent memory.md'),'');
   const app = createServer({ port: 0 });
   await listen(app);
   t.after(async () => { await close(app); await close(mock); await fs.rm(temp, { recursive: true, force: true }); });
@@ -83,11 +86,15 @@ test('e2e: real HTTP app, mocked Ollama, persisted Markdown notes and model hand
   assert.match(appOpen.json.response, /Opened/);
 
   const saved = await post('/api/chat', { message: 'Remember that I should revise econometrics' });
-  assert.equal(saved.json.action, 'create_note');
-  const dir = path.join(temp, 'Documents', 'Aegis Notes');
-  const files = await fs.readdir(dir);
-  assert.equal(files.length, 1);
-  assert.match(await fs.readFile(path.join(dir, files[0]), 'utf8'), /revise econometrics/);
+  assert.equal(saved.json.action, 'memory_remember');
+  assert.equal(saved.json.needsInput, true);
+  const persistent = path.join(temp, 'Documents', 'Obsidian', 'aegis', 'Persistent memory.md');
+  assert.equal(await fs.readFile(persistent,'utf8'), '', 'Nothing written before confirmation.');
+  const approved = await post('/api/chat', {
+    message: 'confirm ' + saved.json.details.confirmationToken
+  });
+  assert.equal(approved.json.action, 'memory_remember');
+  assert.match(await fs.readFile(persistent,'utf8'), /revise econometrics/);
 
   const explanation = await post('/api/chat', { message: 'Explain the CAPM' });
   assert.equal(explanation.status, 200);
@@ -99,7 +106,7 @@ test('e2e: real HTTP app, mocked Ollama, persisted Markdown notes and model hand
   assert.equal(loaded.has('llama3.2:3b'), false, 'LLM unloaded');
 
   const history = await getHistory();
-  assert.equal(history.length, 6);
+  assert.equal(history.length, 8);
   assert.equal(history.at(-1).role, 'assistant');
   const unsupported = await post('/api/settings', { notesFolder: '/etc' });
   assert.equal(unsupported.status, 400);

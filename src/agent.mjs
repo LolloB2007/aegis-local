@@ -7,6 +7,11 @@ import { planIntegration } from './tool-planner.mjs';
 import { stageApproval, takeApproval, cancelApproval } from './approvals.mjs';
 import { desktopIntent, DESKTOP_PLANNED, DESKTOP_MUTATIONS, DESKTOP_READ, validateDesktopArgs, executeDesktop, previewDesktop } from './desktop-tools.mjs';
 import { briefingIntent, runBriefing } from './briefing.mjs';
+import { memoryIntent, MEMORY_MUTATIONS, MEMORY_READS, validateMemoryArgs, memoryPreview, executeMemory } from './memory.mjs';
+import { vaultNavigationIntent, validateVaultNavigationArgs, executeVaultNavigation } from './vault-navigation.mjs';
+import { calendarPlanningIntent, validateCalendarPlanningArgs, executeCalendarPlanning } from './calendar-planning.mjs';
+import { indexIntent, INDEX_MUTATIONS, INDEX_READS, validateIndexArgs, executeIndex, indexPreview } from './document-index.mjs';
+import { developerIntent, validateDeveloperArgs, executeDeveloper } from './developer-tools.mjs';
 
 const SIDE_EFFECTS = new Set(['open_app', 'open_website', 'web_search', 'find_files', 'create_note', 'list_notes']);
 const EXECUTABLE = new Set([...SIDE_EFFECTS, 'get_time', 'help']);
@@ -59,9 +64,17 @@ export async function runTurn(input, hooks = {}) {
         action = 'confirm_expired';
       } else {
         const isDesktop = DESKTOP_MUTATIONS.has(pending.tool);
-        const safeArgs = isDesktop ? validateDesktopArgs(pending.tool, pending.args) : validateIntegrationArgs(pending.tool, pending.args, settings);
+        const isMemory = MEMORY_MUTATIONS.has(pending.tool);
+        const isIndex = INDEX_MUTATIONS.has(pending.tool);
+        const safeArgs = isMemory ? validateMemoryArgs(pending.tool,pending.args)
+          : isIndex ? validateIndexArgs(pending.tool,pending.args)
+          : isDesktop ? validateDesktopArgs(pending.tool, pending.args)
+          : validateIntegrationArgs(pending.tool, pending.args, settings);
         ensureActive();
-        output = isDesktop ? await executeDesktop(pending.tool, safeArgs, settings) : await executeIntegration(pending.tool, safeArgs, settings);
+        output = isMemory ? await executeMemory(pending.tool,safeArgs,settings)
+          : isIndex ? await executeIndex(pending.tool,safeArgs,settings)
+          : isDesktop ? await executeDesktop(pending.tool,safeArgs,settings)
+          : await executeIntegration(pending.tool,safeArgs,settings);
         action = pending.tool;
         emit('Human-confirmed action executed');
       }
@@ -86,9 +99,20 @@ export async function runTurn(input, hooks = {}) {
 
   ensureActive();
   // New tools require a user-command grammar match, never Kev's guess alone.
-  const integrationIntent = explicitIntegrationIntent(text) || desktopIntent(text);
+  const memoryCommand = memoryIntent(text);
+  const vaultCommand = vaultNavigationIntent(text);
+  const calendarCommand = calendarPlanningIntent(text);
+  const indexCommand = indexIntent(text);
+  const developerCommand = developerIntent(text);
+  const directCommand = memoryCommand||vaultCommand||indexCommand||developerCommand;
+  const integrationIntent = directCommand?.intent || calendarCommand || explicitIntegrationIntent(text) || desktopIntent(text);
+  const memory = Boolean(integrationIntent && (MEMORY_READS.has(integrationIntent)||MEMORY_MUTATIONS.has(integrationIntent)));
+  const graph = Boolean(vaultCommand);
+  const index = Boolean(indexCommand);
+  const developer = Boolean(developerCommand);
+  const calendarPlan = Boolean(calendarCommand);
   const desktop = Boolean(integrationIntent && (DESKTOP_READ.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent)));
-  const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent));
+  const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent) || calendarPlan);
   const brief = briefingIntent(text);
   const route = brief ? {intent:'daily_briefing',reason:'Explicit read-only daily workflow',source:'Command guardrail'} : integrationIntent
     ? { intent:integrationIntent, reason:'Explicit integration command verified', source:classification?'Kev + guardrail':'Command fallback' }
@@ -104,7 +128,7 @@ export async function runTurn(input, hooks = {}) {
     output = result;
   } else if (integrationIntent) {
     model = needsPlanning ? settings.llmModel : 'local';
-    let rawArgs = {};
+    let rawArgs = directCommand?.args || {};
     if (needsPlanning) {
       // Serialized asynchronous System One -> System Two handoff. On an 8 GB Mac
       // avoid two heavyweight models remaining resident simultaneously.
@@ -126,12 +150,19 @@ export async function runTurn(input, hooks = {}) {
     }
     try {
       ensureActive();
-      let args = desktop
-        ? validateDesktopArgs(integrationIntent, rawArgs)
+      let args = memory ? validateMemoryArgs(integrationIntent,rawArgs)
+        : graph ? validateVaultNavigationArgs(integrationIntent,rawArgs)
+        : index ? validateIndexArgs(integrationIntent,rawArgs)
+        : developer ? validateDeveloperArgs(integrationIntent,rawArgs)
+        : calendarPlan ? validateCalendarPlanningArgs(integrationIntent,rawArgs)
+        : desktop ? validateDesktopArgs(integrationIntent, rawArgs)
         : validateIntegrationArgs(integrationIntent, rawArgs, settings);
-      if (MUTATING_ACTIONS.has(integrationIntent) || DESKTOP_MUTATIONS.has(integrationIntent)) {
+      if (MUTATING_ACTIONS.has(integrationIntent) || DESKTOP_MUTATIONS.has(integrationIntent) ||
+          MEMORY_MUTATIONS.has(integrationIntent) || INDEX_MUTATIONS.has(integrationIntent)) {
         let summary;
-        if (desktop) {
+        if(memory){const preview=memoryPreview(integrationIntent,args);args=preview.args;summary=preview.summary;}
+        else if(index){const preview=indexPreview();args=preview.args;summary=preview.summary;}
+        else if (desktop) {
           const preview = await previewDesktop(integrationIntent, args, settings);
           args = preview.args;
           summary = preview.summary;
@@ -147,9 +178,13 @@ export async function runTurn(input, hooks = {}) {
         emit('Awaiting human confirmation before changing macOS state');
       } else {
         ensureActive();
-        output = desktop
-          ? await executeDesktop(integrationIntent, args, settings)
-          : await executeIntegration(integrationIntent, args, settings);
+        output = memory ? await executeMemory(integrationIntent,args,settings)
+          : graph ? await executeVaultNavigation(integrationIntent,args,settings)
+          : index ? await executeIndex(integrationIntent,args,settings)
+          : developer ? await executeDeveloper(integrationIntent,args)
+          : calendarPlan ? await executeCalendarPlanning(integrationIntent,args,settings)
+          : desktop ? await executeDesktop(integrationIntent,args,settings)
+          : await executeIntegration(integrationIntent,args,settings);
         emit(`${integrationIntent} executed through guarded tool registry`);
       }
     } catch (e) {
@@ -201,7 +236,7 @@ export async function runTurn(input, hooks = {}) {
       case 'create_note': output = await createNote(text, settings); break;
       case 'list_notes': output = await listNotes(settings); break;
       case 'get_time': output = timeResponse(); break;
-      case 'help': output = { text: helpText + '\n\nAdditional guarded tools: read-only Obsidian vault search, Apple Calendar, Reminders, clipboard and battery, running apps, quit apps, Mail drafts/sending, safe file moves/Trash/batch organization, speaker volume, display brightness (optional CLI), network status, and fixed system diagnostics. Mutating actions require explicit confirmation. Calendar, reminder and clipboard mutations always require a one-time confirmation code. Calendar and Reminders list names can be configured in settings.' }; break;
+      case 'help': output = { text: helpText + '\n\nAdditional guarded tools: explicit confirmed Aegis memory and empty Markdown note creation, read-only Obsidian vault navigation/backlinks/tasks, calendar availability checks, offline document indexing/search, read-only Git/GitHub checks, Apple Calendar, Reminders, clipboard and battery, running apps, quit apps, Mail drafts/sending, safe file moves/Trash/batch organization, speaker volume, display brightness (optional CLI), network status, and fixed system diagnostics. Mutating actions require explicit confirmation. Calendar, reminder and clipboard mutations always require a one-time confirmation code. Calendar and Reminders list names can be configured in settings.' }; break;
       default: output = { text: 'I could not determine the requested action.' };
     }
     emit(`${route.intent} executed locally${output.needsInput ? ' (needs clarification)' : ''}`);

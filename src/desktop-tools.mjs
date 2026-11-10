@@ -73,9 +73,13 @@ function cleanPath(raw,label){
  return candidate;
 }
 async function protectedVault(real,settings){
- const configured=path.resolve(expandHome(settings.vaultRoot||'~/Documents/Obsidian/claude'));
- const root=await fs.realpath(configured).catch(()=>configured);
- if(within(root,real) || within(configured,real))throw new Error('Vault files are protected. Use the vault Git sync workflow.');
+ for(const configuredName of [settings.vaultRoot||'~/Documents/Obsidian/claude',
+                                settings.memoryRoot||'~/Documents/Obsidian/aegis']){
+   const configured=path.resolve(expandHome(configuredName));
+   const actual=await fs.realpath(configured).catch(()=>configured);
+   if(within(configured,real)||within(actual,real))
+     throw new Error('Vault files are protected, including Aegis memory notes. Use dedicated tools.');
+ }
 }
 async function safeExisting(raw,settings,{directory=false}={}){
  const requested=cleanPath(raw,directory?'folder':'file');

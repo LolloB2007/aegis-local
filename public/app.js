@@ -178,6 +178,7 @@ function fillSettings() {
   $('notes-folder').value = settings.notesFolder;
   $('search-roots').value = settings.searchRoots.join('\n');
   $('vault-root').value = settings.vaultRoot || '~/Documents/Obsidian/claude';
+  $('memory-root').value = settings.memoryRoot || '~/Documents/Obsidian/aegis';
   $('calendar-name').value = settings.calendarName || '';
   $('reminder-list-name').value = settings.reminderListName || '';
 }

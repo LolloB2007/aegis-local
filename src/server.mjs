@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getSettings, saveSettings, getHistory, clearHistory } from './store.mjs';
 import { getOllamaStatus, unloadModel, warmKev } from './ollama.mjs';
 import { runTurn } from './agent.mjs';
+import { initializeStartupContext, getStartupContext } from './startup-context.mjs';
 
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -45,7 +46,11 @@ function securityCheck(req, port) {
   }
 }
 
-export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } = {}) {
+export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210, startup = null } = {}) {
+  // No chat endpoint becomes usable until Persistent memory.md was read.
+  const readiness = (startup || (async()=>initializeStartupContext(await getSettings()))())
+    .then(value=>({ok:true,context:value}))
+    .catch(e=>({ok:false,error:e.message}));
   let work = Promise.resolve();
   let activeJobs = 0;
   let lastWorkAt = Date.now();
@@ -80,12 +85,21 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } =
     try {
       securityCheck(req, server.address()?.port || port);
       const url = new URL(req.url || '/', `http://127.0.0.1:${port}`);
+      const ready = await readiness;
+      if (req.method === 'GET' && url.pathname === '/api/health') {
+        return send(res,ready.ok?200:503,{
+          ok:ready.ok,service:'aegis-core',version:'2.1.0-rc.1',
+          startup:ready.ok?{promptLoaded:ready.context.promptLoaded,memoryLoaded:true,memoryCharacters:ready.context.memoryCharacters,loadedAt:ready.context.loadedAt}:
+          {error:ready.error}
+        });
+      }
+      if(!ready.ok && (url.pathname==='/api/chat'||url.pathname==='/api/stream'||
+          url.pathname==='/api/warm'||url.pathname==='/api/unload')) {
+        return send(res,503,{error:'Aegis startup incomplete: '+ready.error});
+      }
       if (req.method === 'GET' && url.pathname === '/api/bootstrap') {
         const [settings, history] = await Promise.all([getSettings(), getHistory()]);
         return send(res, 200, { settings, history });
-      }
-      if (req.method === 'GET' && url.pathname === '/api/health') {
-        return send(res, 200, {ok:true, service:'aegis-core', version:'2.0.0-rc.1'});
       }
       if (req.method === 'GET' && url.pathname === '/api/status') {
         const settings = await getSettings();
@@ -204,13 +218,22 @@ export function createServer({ port = Number(process.env.AEGIS_PORT) || 3210 } =
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.AEGIS_PORT) || 3210;
-  const server = createServer({ port });
-  server.listen(port, '127.0.0.1', () => {
-    console.log('');
-    console.log('  AEGIS LOCAL  //  System One + System Two');
-    console.log(`  Open http://127.0.0.1:${port}`);
-    console.log('  Press Ctrl+C to stop. All app data stays on this Mac.');
-    console.log('');
-  });
-  server.on('error', e => { console.error(`Server error: ${e.message}`); process.exitCode = 1; });
+  // Strict startup gate: an existing, possibly EMPTY Persistent memory.md
+  // must have been successfully read before the assistant listens for requests.
+  const launch = async () => {
+    try {
+      const ready = await initializeStartupContext(await getSettings());
+      console.log('[aegis] Startup context loaded: prompt='+
+        (ready.promptLoaded?'yes':'fallback')+', persistent memory='+ready.memoryCharacters+' characters');
+      const server = createServer({port,startup:Promise.resolve(ready)});
+      server.listen(port,'127.0.0.1',()=> {
+        console.log('AEGIS LOCAL 2.1 // Listening at http://127.0.0.1:'+port);
+      });
+      server.on('error',e=>{console.error('[aegis] Server:',e.message);process.exitCode=1;});
+    } catch(e) {
+      console.error('[aegis] Not ready:',e.message);
+      process.exitCode=1;
+    }
+  };
+  launch();
 }
