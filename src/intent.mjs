@@ -6,7 +6,8 @@ export const APP_CHOICES = Object.freeze({
   chrome: 'Google Chrome', settings: 'System Settings', preview: 'Preview',
   slack: 'Slack', outlook: 'Microsoft Outlook', spotify: 'Spotify',
   discord: 'Discord', zoom: 'zoom.us', teams: 'Microsoft Teams',
-  iterm: 'iTerm', activity_monitor: 'Activity Monitor'
+  iterm: 'iTerm', activity_monitor: 'Activity Monitor',
+  whatsapp: 'WhatsApp', opera_gx: 'Opera GX'
 });
 
 export function detectApp(text) {
@@ -14,6 +15,8 @@ export function detectApp(text) {
   const rules = [
     ['vscode', /\b(vs\s*code|visual studio code|code editor)\b/],
     ['chrome', /\b(chrome|google chrome)\b/],
+    ['opera_gx', /\bopera\s*gx\b/],
+    ['whatsapp', /\bwhats?app\b/],
     ['settings', /\b(system settings|system preferences)\b/],
     ['outlook', /\b(microsoft outlook|outlook)\b/],
     ['slack', /\bslack\b/], ['spotify', /\bspotify\b/],
@@ -66,8 +69,8 @@ export function explicitIntent(text) {
   if (/^(\/help|help|what can you do\??)$/.test(s)) return 'help';
   if (/^(what('s| is) the time|what time is it|current time|what('s| is) today('s date)?|today's date)\??$/.test(s)) return 'get_time';
   if (/^(list|show) (my )?(saved )?notes\??$/.test(s)) return 'list_notes';
-  if (/^(open|launch|start)\s+/.test(s) && detectApp(text)) return 'open_app';
   if (/^(open|go to|visit|browse)\s+/.test(s) && extractUrl(text)) return 'open_website';
+  if (/^(open|launch|start)\s+/.test(s) && detectApp(text)) return 'open_app';
   if (/^(google|search (the )?(web|internet|google)|search for|look up|find online)\s+/.test(s)) return 'web_search';
   if (/^(find|locate|search for|where is|where are)\s+/.test(s) && /(file|document|pdf|folder|download|presentation|spreadsheet|\.\w{2,5})/.test(s)) return 'find_files';
   if (extractNote(text)) return 'create_note';

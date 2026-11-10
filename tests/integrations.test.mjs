@@ -38,6 +38,7 @@ test('vault search, read, navigation and symlink escape protection',async t=>{
  t.after(()=>fs.rm(temp,{recursive:true,force:true}));
  const root=path.join(temp,'vault');
  await fs.mkdir(path.join(root,'Projects','Aegis'),{recursive:true});
+ await fs.writeFile(path.join(root,'_Aegis.md'),"---\naegis-access: read-only\n---\n# Aegis Operating Manual — Read-Only Vault Access\nNever write.\n");
  await fs.writeFile(path.join(root,'Projects','Aegis','Aegis Local.md'),'# Aegis\nLocal models keep data private.\n');
  await fs.symlink('/etc',path.join(root,'escape'));
  const settings={vaultRoot:root};

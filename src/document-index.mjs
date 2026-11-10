@@ -2,6 +2,7 @@
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {expandHome,inUserHome} from './store.mjs';
+import {requireVaultPolicy} from './vault-policy.mjs';
 
 const script=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../scripts/local_index.py');
 export const INDEX_MUTATIONS=new Set(['index_rebuild']);
@@ -46,6 +47,9 @@ async function pythonTask(intent,p,settings) {
 }
 export async function executeIndex(intent,p,settings) {
  const args=validateIndexArgs(intent,p);
+ // Rebuilding can traverse the personal Obsidian vault. Require the manual
+ // before any scan, even when Documents is an indexed search root.
+ if(intent==='index_rebuild')await requireVaultPolicy(settings);
  const result=await pythonTask(intent,args,settings);
  if(intent==='index_rebuild')
    return {text:'Local index updated: '+result.indexed+' documents, '+result.errors+' unreadable files.'+(result.partial?' Scan stopped at a safety limit.':''),details:result};

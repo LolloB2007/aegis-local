@@ -3,17 +3,19 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { expandHome, inUserHome } from './store.mjs';
+import { requireVaultPolicy } from './vault-policy.mjs';
 
 // Neither Kev nor the text model may supply executable commands or tool names.
 const exec = promisify(execFile);
 const MAX_RESPONSE = 24000;
 const READ = new Set(['vault_list','vault_read','vault_search','calendar_list','clipboard_read','battery_status']);
-export const MUTATING_ACTIONS = new Set(['calendar_create','reminder_create','clipboard_write']);
-export const PLANNED_ACTIONS = new Set(['vault_list','vault_read','vault_search','calendar_list','calendar_create','reminder_create','clipboard_write']);
+export const MUTATING_ACTIONS = new Set(['calendar_create','reminder_create','clipboard_write','notes_create']);
+export const PLANNED_ACTIONS = new Set(['vault_list','vault_read','vault_search','calendar_list','calendar_create','reminder_create','clipboard_write','notes_create']);
 
 export function explicitIntegrationIntent(raw) {
   const s = String(raw || '').trim().toLowerCase();
   if (/^(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?(?:calendar|obsidian)\s*$/.test(s)) return null;
+  if (/^(?:please\s+)?(?:create|add|make|write)\s+(?:an?\s+)?(?:new\s+)?(?:apple\s+notes?\s+note|note\s+in\s+(?:the\s+)?notes?\s+app|note\s+in\s+apple\s+notes?)\b/.test(s)) return 'notes_create';
   if (/^(?:please\s+)?(?:create|add|schedule|book|put|set up)\s+(?:an?\s+)?(?:new\s+)?(?:event|meeting|appointment|call|calendar entry|lunch|dinner)\b/.test(s) || /^(?:please\s+)?schedule\s+.+/.test(s)) return 'calendar_create';
   if (/^(?:please\s+)?(?:create|add|schedule|book)\s+(?:an?\s+)?(?:new\s+)?calendar\s+event\b/.test(s)) return 'calendar_create';
   if (/^(?:please\s+)?(?:read|show|summarize|display)\s+.+\b(?:my\s+)?(?:vault|obsidian)\b/.test(s)) return 'vault_read';
@@ -35,7 +37,8 @@ export function toolSchema(intent) {
     calendar_list: {from:'ISO8601 timestamp with timezone',to:'ISO8601 timestamp with timezone',calendar:'Exact calendar name or empty for all'},
     calendar_create: {title:'Event title',start:'ISO8601 timestamp with timezone',end:'ISO8601 timestamp with timezone',calendar:'Exact calendar name or empty',notes:'Optional event notes'},
     reminder_create: {title:'Reminder text',due:'Optional ISO8601 timestamp with timezone',list:'Exact reminders list name or empty'},
-    clipboard_write: {text:'Exact text to copy to clipboard'}
+    clipboard_write: {text:'Exact text to copy to clipboard'},
+    notes_create: {title:'Title for new Apple Notes note',body:'Text content of the note',folder:'Exact existing Apple Notes folder name, empty for default'}
   })[intent] || null;
 }
 function boundedText(value, limit, label, required=true) {
@@ -69,6 +72,11 @@ export function validateIntegrationArgs(intent,raw,settings,now=Date.now()) {
       if(!calendar) throw new Error('Which calendar? Specify its exact name (e.g. "on Personal calendar") or set calendarName in settings.');
       return {title,start,end,calendar,notes:boundedText(p.notes??'',2000,'event notes',false)};
     }
+    case 'notes_create': return {
+      title:boundedText(p.title??'',140,'Apple Notes title'),
+      body:boundedText(p.body??'',5000,'Apple Notes body'),
+      folder:boundedText(p.folder??'',100,'Apple Notes folder',false)
+    };
     case 'reminder_create': {
       const title=boundedText(p.title??'',240,'reminder title'),due=isoDate(p.due??'','due time',true);
       const list=boundedText(p.list||settings.reminderListName||'',100,'reminders list',false);
@@ -82,9 +90,9 @@ export function validateIntegrationArgs(intent,raw,settings,now=Date.now()) {
 }
 function within(root, target){return target===root||target.startsWith(root+path.sep);}
 async function vaultPath(settings, relative=''){
-  const root=expandHome(settings.vaultRoot);
-  if(!inUserHome(root)) throw new Error('Vault must be inside your home.');
-  const base=await fs.realpath(root);
+  // This is the ONLY entrypoint for list/read/search: reread and verify
+  // _Aegis.md on every operation, not merely once per Node boot.
+  const {root:base}=await requireVaultPolicy(settings);
   if(typeof relative!=='string'||path.isAbsolute(relative)||relative.includes('\\')||relative.includes('\0')) throw new Error('Use a vault-relative path.');
   const cleaned=relative.replace(/^\.\//,'').replace(/\/$/,'');
   if(cleaned.split('/').some(part=>part==='..'||part.startsWith('.'))) throw new Error('Hidden and parent paths are prohibited.');
@@ -145,7 +153,7 @@ async function macCommand(bin,args){
 const eventScript=`function run(argv) {
  const app=Application('Calendar'),[title,start,end,calendarName,notes]=argv;
  const matches=app.calendars.whose({name:calendarName})();
- if(!matches.length) throw Error('Calendar not found: '+calendarName);
+ if(matches.length!==1) throw Error('Expected exactly one calendar named '+calendarName+'; matches='+matches.length);
  const event=app.Event({summary:title,startDate:new Date(start),endDate:new Date(end),description:notes});
  matches[0].events.push(event);
  return 'Created calendar event: '+title;
@@ -173,6 +181,22 @@ const reminderScript=`function run(argv) {
  lists[0].reminders.push(app.Reminder(p));
  return 'Created reminder: '+title;
 }`;
+const notesCreateScript=`function run(argv){
+ const [title,body,folderName]=argv;
+ const app=Application('Notes');
+ const accounts=app.accounts();
+ if(!accounts.length)throw Error('Configure an Apple Notes account first.');
+ const account=app.defaultAccount();
+ const folders=account.folders();
+ const selected=folderName?folders.filter(folder=>folder.name()===folderName):
+    folders.filter(folder=>folder.name()==='Notes');
+ const target=selected.length===1?selected[0]:(!folderName&&folders.length===1?folders[0]:null);
+ if(!target)throw Error('Apple Notes folder missing or ambiguous. Specify an exact existing folder.');
+ const escapeHtml=value=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+ const html='<h1>'+escapeHtml(title)+'</h1><div>'+escapeHtml(body).replace(/\\n/g,'<br/>')+'</div>';
+ target.notes.push(app.Note({name:title,body:html}));
+ return 'Created Apple Notes note: '+title;
+}`;
 const clipboardSetScript=`on run argv\nset the clipboard to (item 1 of argv)\nreturn "Clipboard updated"\nend run`;
 export async function executeIntegration(intent,params,settings){
   if(!READ.has(intent)&&!MUTATING_ACTIONS.has(intent)) throw new Error('Tool not allowed.');
@@ -180,6 +204,7 @@ export async function executeIntegration(intent,params,settings){
     case 'vault_list':return vaultList(settings,params);
     case 'vault_read':return vaultRead(settings,params);
     case 'vault_search':return vaultSearch(settings,params);
+    case 'notes_create':return {text:await macCommand('/usr/bin/osascript',['-l','JavaScript','-e',notesCreateScript,params.title,params.body,params.folder])};
     case 'calendar_create':return {text:await macCommand('/usr/bin/osascript',['-l','JavaScript','-e',eventScript,params.title,params.start,params.end,params.calendar,params.notes])};
     case 'calendar_list':{
       const raw=await macCommand('/usr/bin/osascript',['-l','JavaScript','-e',listScript,params.from,params.to,params.calendar]);
@@ -195,6 +220,7 @@ export async function executeIntegration(intent,params,settings){
   }
 }
 export function confirmationSummary(intent,p){
+  if(intent==='notes_create')return `Create a note in Apple Notes, folder "${p.folder||'Notes (default)'}":\nTitle: ${p.title}\n\n${p.body}`;
   if(intent==='calendar_create')return `Create "${p.title}" in calendar "${p.calendar}" from ${p.start} to ${p.end}${p.notes?`; notes: ${p.notes}`:''}`;
   if(intent==='reminder_create')return `Add reminder "${p.title}" to "${p.list}"${p.due?` due ${p.due}`:''}`;
   if(intent==='clipboard_write')return `Replace clipboard with: ${p.text.slice(0,250)}${p.text.length>250?'...':''}`;

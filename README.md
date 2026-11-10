@@ -1,8 +1,34 @@
-# Aegis Local v2.1 — Memory & Integrations Release Candidate
+# Aegis Local v2.2 — Native Integrations & Read-Only Vault Release Candidate
 
 Local-first macOS assistant for an M1 MacBook Air with **8 GB RAM**. **No Electron is required.** The default v2 interface is a native PyObjC/AppKit menu-bar controller with a small, transient, top-right floating panel. The Node core remains the sole tool executor and Ollama orchestrator.
 
 > **Release-candidate status:** The native panel, global hotkeys, microphone access, Accessibility permissions, fullscreen Spaces, and LaunchAgent startup must be verified on the target Mac. Passing CI does not prove fullscreen or microphone behavior. See [RC verification checklist](docs/RELEASE_CANDIDATE_CHECKLIST.md).
+
+## v2.2 RC: macOS integrations, vault access gate, 3B context compaction
+
+- **WhatsApp** and **Opera GX** are added to the fixed app-launch/quit allowlist. Aegis does not send WhatsApp messages or read WhatsApp conversations.
+- **Preferred browser** defaults to **Google Chrome** for Aegis website/search commands, independently of the system's Opera GX default. Configure Chrome, Safari, Opera GX, or macOS default in Settings; explicit `in Safari` / `in Opera GX` overrides work.
+- **Apple Notes**: `Create a note in the Notes app...` uses fixed JXA via `/usr/bin/osascript`, requires an exact title/body and an existing Notes folder, and is **always approval-gated**. It is entirely separate from Aegis-owned Markdown memory.
+- **Apple Calendar** creation continues to use JXA/`osascript` with an exact existing calendar, bounded ISO8601 dates, a full preview and one-use confirmation token.
+- **Obsidian read-only contract**: personal-vault list/read/search, backlinks, outgoing links, task lookup and document-index rebuild require a valid `_Aegis.md` at `~/Documents/Obsidian/claude/_Aegis.md`. The file is read and verified on every vault operation. Missing/invalid manuals cause vault tools to fail closed. [Vault PR #17](https://github.com/LolloB2007/remote-vault/pull/17) has been merged; your local vault must sync it before these tools become available.
+- **Ollama-assisted context compaction:** when old chat grows, the local 3B chooses important *IDs* of past user messages; Aegis retains only verbatim excerpts validated against the actual messages. The session rollup lives in `~/.aegis-local/session-compaction.json` and is used as **unverified historical context**, never as a new instruction or personal memory. This does not change `Persistent memory.md`. Toggle automatic compaction in Settings.
+
+**Spotify playlist controls intentionally deferred.** No new Spotify playlist automation or configuration is part of this release.
+
+### Additional commands
+
+```text
+Open WhatsApp
+Open github.com                  # Google Chrome by default
+Open github.com in Safari
+Search the web for Apple Notes tutorials in Opera GX
+Create a note in the Notes app called Shopping: buy coffee and rice
+Schedule a meeting tomorrow at 10 on Personal calendar
+```
+
+**On-device release gate:** macOS must grant Apple Notes/Calendar Automation permissions. CI validates routing, fixed commands, approvals and vault access but cannot guarantee the target Mac's Notes or Calendar accounts are configured.
+
+---
 
 ## v2.1: Boot memory and protected Obsidian
 

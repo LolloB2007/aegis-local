@@ -16,12 +16,14 @@ export const defaults = Object.freeze({
   confidenceThreshold: 0.55,
   contextTokens: 2048,
   historyCount: 12,
+  autoCompact: true,
   searchRoots: ['~/Documents', '~/Desktop', '~/Downloads'],
   notesFolder: '~/Documents/Aegis Notes',
   memoryRoot: '~/Documents/Obsidian/aegis',
   vaultRoot: '~/Documents/Obsidian/claude',
   calendarName: '',
-  reminderListName: ''
+  reminderListName: '',
+  preferredBrowser: 'chrome'
 });
 
 export const expandHome = value => typeof value === 'string'
@@ -53,6 +55,9 @@ export function validateSettings(raw) {
   v.ollamaUrl = assertLocalUrl(v.ollamaUrl);
   v.autoUnload = Boolean(v.autoUnload);
   v.autoReloadKev = Boolean(v.autoReloadKev);
+  v.autoCompact = Boolean(v.autoCompact);
+  if(!['chrome','safari','opera_gx','system'].includes(v.preferredBrowser))
+    throw new Error('Preferred browser must be Chrome, Safari, Opera GX or the macOS system default.');
   v.confidenceThreshold = Math.max(0.30, Math.min(0.95, Number(v.confidenceThreshold) || defaults.confidenceThreshold));
   v.contextTokens = Math.max(512, Math.min(8192, Math.round(Number(v.contextTokens) || defaults.contextTokens)));
   v.historyCount = Math.max(2, Math.min(24, Math.round(Number(v.historyCount) || defaults.historyCount)));

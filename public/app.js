@@ -179,6 +179,8 @@ function fillSettings() {
   $('search-roots').value = settings.searchRoots.join('\n');
   $('vault-root').value = settings.vaultRoot || '~/Documents/Obsidian/claude';
   $('memory-root').value = settings.memoryRoot || '~/Documents/Obsidian/aegis';
+  $('auto-compact').checked = settings.autoCompact !== false;
+  $('preferred-browser').value = settings.preferredBrowser || 'chrome';
   $('calendar-name').value = settings.calendarName || '';
   $('reminder-list-name').value = settings.reminderListName || '';
 }
@@ -216,6 +218,8 @@ $('settings-form').addEventListener('submit', async event => {
     contextTokens: Number($('context-tokens').value), confidenceThreshold: Number($('threshold').value),
     notesFolder: $('notes-folder').value.trim(),
     vaultRoot: $('vault-root').value.trim(),
+    autoCompact: $('auto-compact').checked,
+    preferredBrowser: $('preferred-browser').value,
     calendarName: $('calendar-name').value.trim(),
     reminderListName: $('reminder-list-name').value.trim(),
     searchRoots: $('search-roots').value.split('\n').map(x => x.trim()).filter(Boolean)

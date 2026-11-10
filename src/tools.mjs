@@ -23,19 +23,29 @@ export async function openApp(key) {
   return { text: `Opened **${app}**.`, details: { app } };
 }
 
-export async function openWebsite(text) {
-  const url = extractUrl(text);
-  if (!url) return { text: 'Give me an exact URL, for example `open github.com`.', needsInput: true };
-  await openMac([url]);
-  return { text: `Opened ${url}`, details: { url } };
+const browserApps = Object.freeze({chrome:APP_CHOICES.chrome,safari:APP_CHOICES.safari,opera_gx:APP_CHOICES.opera_gx});
+export function browserForRequest(text,settings={}) {
+  const match=String(text).match(/\s+in\s+(Google\s+Chrome|Chrome|Safari|Opera\s*GX)\s*[.!?]?$/i);
+  const name=match?.[1]?.toLowerCase().replace(/\s+/g,'');
+  const preferred=name ? name==='googlechrome'||name==='chrome'?'chrome':name==='safari'?'safari':'opera_gx':
+    (settings.preferredBrowser||'system');
+  if(preferred!=='system'&&!browserApps[preferred])throw new Error('Unsupported browser preference.');
+  return {app:preferred==='system'?null:browserApps[preferred],text:match?text.slice(0,match.index).trim():text};
 }
-
-export async function webSearch(text) {
-  const query = extractSearch(text);
-  if (query.length < 2) return { text: 'What should I search for?', needsInput: true };
-  const url = `https://www.google.com/search?q=${encodeURIComponent(query.slice(0, 400))}`;
-  await openMac([url]);
-  return { text: `Searched the web for **${query}** in your browser.`, details: { url } };
+export async function openWebsite(text,settings={}) {
+  const browser=browserForRequest(text,settings);
+  const url=extractUrl(browser.text);
+  if(!url)return {text:'Give an exact URL, e.g. open github.com.',needsInput:true};
+  await openMac(browser.app?['-a',browser.app,url]:[url]);
+  return {text:'Opened '+url+(browser.app?' in '+browser.app:''),details:{url,browser:browser.app||'system'}};
+}
+export async function webSearch(text,settings={}) {
+  const browser=browserForRequest(text,settings);
+  const query=extractSearch(browser.text);
+  if(query.length<2)return {text:'What should I search for?',needsInput:true};
+  const url='https://www.google.com/search?q='+encodeURIComponent(query.slice(0,400));
+  await openMac(browser.app?['-a',browser.app,url]:[url]);
+  return {text:'Searched the web for **'+query+'**'+(browser.app?' in '+browser.app:''),details:{url,browser:browser.app||'system'}};
 }
 
 function safeBasename(name) {

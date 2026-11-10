@@ -14,6 +14,7 @@ const {developerIntent,executeDeveloper}=await import('../src/developer-tools.mj
 test('Obsidian graph navigation lists actual backlinks, outgoing links, and tasks without writing notes',async()=>{
  const root=path.join(home,'Documents','Obsidian','claude');
  await fs.mkdir(path.join(root,'Projects'),{recursive:true});
+ await fs.writeFile(path.join(root,'_Aegis.md'),"---\naegis-access: read-only\n---\n# Aegis Operating Manual — Read-Only Vault Access\nNever write.\n");
  await fs.writeFile(path.join(root,'Projects','Aegis.md'),'# Aegis\n- [ ] Implement safe search\n');
  await fs.writeFile(path.join(root,'Index.md'),'# Index\nSee [[Projects/Aegis]] and [[Missing Note]].\n');
  const before=await fs.readdir(root);

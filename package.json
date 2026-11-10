@@ -1,6 +1,6 @@
 {
   "name": "aegis-local",
-  "version": "2.1.0-rc.1",
+  "version": "2.2.0-rc.1",
   "private": true,
   "description": "A local two-model macOS assistant powered by Ollama Kev System One and a lightweight LLM.",
   "type": "module",
