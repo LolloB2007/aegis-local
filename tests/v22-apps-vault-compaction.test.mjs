@@ -33,7 +33,7 @@ test('Apple Notes creation is bounded and confirmation gated like Calendar',asyn
  assert.equal(explicitIntegrationIntent('Create a note in the Notes app about statistics'),'notes_create');
  const p=validateIntegrationArgs('notes_create',{title:'Study',body:'Review statistics',folder:'Notes'},await getSettings());
  assert.match(confirmationSummary('notes_create',p),/Review statistics/);
- assert.throws(()=>validateIntegrationArgs('notes_create',{title:'Study',body:'x'.repeat(5500)},await getSettings()),/Invalid Apple Notes body/);
+ assert.throws(()=>validateIntegrationArgs('notes_create',{title:'Study',body:'x'.repeat(5500)},p),/Invalid Apple Notes body/);
  const token=stageApproval('notes_create',p,confirmationSummary('notes_create',p));
  assert.deepEqual(takeApproval(token).args,p);
  assert.equal(takeApproval(token),null);

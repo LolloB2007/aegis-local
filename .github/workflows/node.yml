@@ -5,8 +5,6 @@ on:
     branches: [main, "feat/**"]
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,18 +16,9 @@ jobs:
       - name: Syntax-check core and voice
         run: |
           find src -type f \( -name '*.mjs' -o -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n1 node --check
+          find tests -type f -name '*.test.mjs' -print0 | xargs -0 -n1 node --check
       - name: Run offline unit/integration tests with mocked Ollama
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if npm test > unit-report.txt 2>&1; then
-            cat unit-report.txt
-          else
-            cat unit-report.txt
-            { echo 'v2.2 test failure diagnostics:'; echo '~~~'; tail -n 220 unit-report.txt; echo '~~~'; } > report.md
-            gh pr comment 6 --body-file report.md || true
-            exit 1
-          fi
+        run: npm test
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
