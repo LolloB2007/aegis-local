@@ -120,7 +120,7 @@ def install(with_voice: bool) -> None:
     retire_legacy_voice()
     register(SERVER, [str(Path(node).resolve()), str(ROOT / "src/server.mjs")])
     if with_voice:
-        register(VOICE, [str(Path(sys.executable).resolve()), str(VOICE_FILE)], voice=True)
+        register(VOICE, [str(Path(sys.executable).absolute()), str(VOICE_FILE)], voice=True)  # Preserve venv interpreter shim
     else:
         print("Server installed. To install voice as well, rerun with --with-voice.")
     status()
