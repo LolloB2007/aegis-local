@@ -62,6 +62,7 @@ def make_plist(label: str, command: list[str], *, voice: bool = False) -> dict:
         "KeepAlive": True,
         "ThrottleInterval": 15,
         "ProcessType": "Background",
+        "Umask": 0o077,
         "StandardOutPath": str(LOGS / ("voice.log" if voice else "server.log")),
         "StandardErrorPath": str(LOGS / ("voice-error.log" if voice else "server-error.log")),
     }
@@ -69,14 +70,15 @@ def make_plist(label: str, command: list[str], *, voice: bool = False) -> dict:
 
 def register(label: str, command: list[str], *, voice: bool = False) -> None:
     AGENTS.mkdir(parents=True, exist_ok=True)
-    LOGS.mkdir(parents=True, exist_ok=True)
+    LOGS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    LOGS.chmod(0o700)
     p = plist_path(label)
     bootout(label)
     with p.open("wb") as file:
         plistlib.dump(make_plist(label, command, voice=voice), file, sort_keys=True)
     p.chmod(0o600)
-    launchctl("bootstrap", domain(), str(p), check=True)
     launchctl("enable", f"{domain()}/{label}", check=True)
+    launchctl("bootstrap", domain(), str(p), check=True)
     launchctl("kickstart", "-k", f"{domain()}/{label}", check=True)
     print(f"Installed {label} at {p}")
 
@@ -101,8 +103,8 @@ def validate_voice() -> None:
 def retire_legacy_voice() -> None:
     """Do not let the old Electron login job compete for the same hotkey."""
     old = plist_path(OLD_VOICE)
+    bootout(OLD_VOICE)  # Also stop a legacy service whose plist has gone missing.
     if old.exists():
-        bootout(OLD_VOICE)
         launchctl("disable", f"{domain()}/{OLD_VOICE}")
         backup = old.with_name(old.name + ".v1.4-disabled")
         if backup.exists():

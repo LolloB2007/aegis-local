@@ -26,6 +26,7 @@ class LaunchAgentTests(unittest.TestCase):
         self.assertEqual(p["ProgramArguments"][0], "/usr/local/bin/node")
         self.assertEqual(p["ThrottleInterval"], 15)
         self.assertEqual(p["ProcessType"], "Background")
+        self.assertEqual(p["Umask"], 0o077)
         self.assertTrue(plistlib.loads(plistlib.dumps(p))["RunAtLoad"])
         voice = installer.make_plist(
             "com.aegis.local.voice", ["/some/python", "/some/headless_voice.py"], voice=True
