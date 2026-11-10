@@ -1,0 +1,4 @@
+# Native macOS overlay, no Electron or Qt. Install in an isolated venv.
+pyobjc-framework-Cocoa>=10.3,<14
+pyobjc-framework-Quartz>=10.3,<14
+pynput>=1.8,<2

@@ -16,11 +16,13 @@ import sys
 
 SERVER = "com.aegis.local.server"
 VOICE = "com.aegis.local.voice"
+NATIVE = "com.aegis.local.native"
 OLD_VOICE = "com.aegis.local.voicecontrol"
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS = Path.home() / "Library/LaunchAgents"
 LOGS = Path.home() / ".aegis-local/logs"
 VOICE_FILE = ROOT / "src/ui/voice-control/headless_voice.py"
+NATIVE_FILE = ROOT / "src/ui/native/app.py"
 ENV_PATH = ":".join(filter(None, [
     str(Path.home() / ".local/bin"),
     "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
@@ -47,13 +49,14 @@ def bootout(label: str) -> None:
     launchctl("bootout", f"{domain()}/{label}", check=False)
 
 
-def make_plist(label: str, command: list[str], *, voice: bool = False) -> dict:
+def make_plist(label: str, command: list[str], *, voice: bool = False, native: bool = False) -> dict:
     return {
         "Label": label,
         "ProgramArguments": command,
         "WorkingDirectory": str(ROOT),
         "EnvironmentVariables": {
             "PATH": ENV_PATH,
+            "AEGIS_ROOT": str(ROOT),
             "AEGIS_PORT": os.environ.get("AEGIS_PORT", "3210"),
             "AEGIS_AUDIO_DEVICE": os.environ.get("AEGIS_AUDIO_DEVICE", ":0"),
             "PARAKEET_TRANSCRIBE": os.environ.get("PARAKEET_TRANSCRIBE", str(Path.home() / ".local/bin/parakeet-transcribe")),
@@ -61,21 +64,21 @@ def make_plist(label: str, command: list[str], *, voice: bool = False) -> dict:
         "RunAtLoad": True,
         "KeepAlive": True,
         "ThrottleInterval": 15,
-        "ProcessType": "Background",
+        "ProcessType": "Interactive" if native else "Background",
         "Umask": 0o077,
-        "StandardOutPath": str(LOGS / ("voice.log" if voice else "server.log")),
-        "StandardErrorPath": str(LOGS / ("voice-error.log" if voice else "server-error.log")),
+        "StandardOutPath": str(LOGS / ("native.log" if native else "voice.log" if voice else "server.log")),
+        "StandardErrorPath": str(LOGS / ("native-error.log" if native else "voice-error.log" if voice else "server-error.log")),
     }
 
 
-def register(label: str, command: list[str], *, voice: bool = False) -> None:
+def register(label: str, command: list[str], *, voice: bool = False, native: bool = False) -> None:
     AGENTS.mkdir(parents=True, exist_ok=True)
     LOGS.mkdir(parents=True, exist_ok=True, mode=0o700)
     LOGS.chmod(0o700)
     p = plist_path(label)
     bootout(label)
     with p.open("wb") as file:
-        plistlib.dump(make_plist(label, command, voice=voice), file, sort_keys=True)
+        plistlib.dump(make_plist(label, command, voice=voice, native=native), file, sort_keys=True)
     p.chmod(0o600)
     launchctl("enable", f"{domain()}/{label}", check=True)
     launchctl("bootstrap", domain(), str(p), check=True)
@@ -113,23 +116,59 @@ def retire_legacy_voice() -> None:
         print(f"Disabled obsolete voice LaunchAgent; backup retained at {backup}")
 
 
-def install(with_voice: bool) -> None:
+def validate_native() -> None:
+    validate_voice()
+    if not NATIVE_FILE.is_file():
+        raise RuntimeError("Native controller file missing.")
+    checks = subprocess.run([sys.executable, "-c",
+        "import AppKit, Foundation, objc, Quartz, pynput.keyboard"],
+        text=True, capture_output=True, timeout=15, check=False)
+    if checks.returncode != 0:
+        raise RuntimeError(
+            "Native dependencies missing. In your venv run "
+            "'python -m pip install -r requirements-native.txt'. "
+            + checks.stderr[-300:])
+
+
+def retire_other(label: str) -> None:
+    """Disable the other voice implementation; never register competing hotkeys."""
+    bootout(label)
+    old = plist_path(label)
+    if old.exists():
+        backup = old.with_name(old.name + ".v2-disabled")
+        if backup.exists():
+            backup = old.with_name(old.name + f".v2-disabled-{os.getpid()}")
+        old.rename(backup)
+        print(f"Disabled previous service {label}; original plist backed up to {backup}")
+
+
+def install(with_voice: bool, with_native: bool = False) -> None:
     node = shutil.which("node", path=ENV_PATH)
     if not node:
         raise RuntimeError("Cannot locate Node.js. Install Node 20+ and try again.")
-    if with_voice:
-        validate_voice()  # Fail before altering the existing service.
+    if with_native and with_voice:
+        raise RuntimeError("Choose one voice controller: --with-native OR --with-voice.")
+    if with_native:
+        validate_native()  # Check dependencies before touching login services.
+    elif with_voice:
+        validate_voice()
     retire_legacy_voice()
+    if with_native:
+        retire_other(VOICE)
+    elif with_voice:
+        retire_other(NATIVE)
     register(SERVER, [str(Path(node).resolve()), str(ROOT / "src/server.mjs")])
-    if with_voice:
-        register(VOICE, [str(Path(sys.executable).absolute()), str(VOICE_FILE)], voice=True)  # Preserve venv interpreter shim
+    if with_native:
+        register(NATIVE, [str(Path(sys.executable).absolute()), str(NATIVE_FILE)], native=True)
+    elif with_voice:
+        register(VOICE, [str(Path(sys.executable).absolute()), str(VOICE_FILE)], voice=True)
     else:
-        print("Server installed. To install voice as well, rerun with --with-voice.")
+        print("Server installed. To install native overlay also use --with-native.")
     status()
 
 
 def uninstall() -> None:
-    for label in (VOICE, SERVER):
+    for label in (NATIVE, VOICE, SERVER):
         bootout(label)
         p = plist_path(label)
         if p.exists():
@@ -139,7 +178,7 @@ def uninstall() -> None:
 
 
 def status() -> None:
-    for label in (SERVER, VOICE):
+    for label in (SERVER, NATIVE, VOICE):
         result = launchctl("print", f"{domain()}/{label}")
         if result.returncode != 0:
             print(f"{label}: not registered (or not running in current GUI login)")
@@ -152,7 +191,8 @@ def status() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage Aegis login-time LaunchAgents")
     parser.add_argument("command", choices=["install", "status", "uninstall"])
-    parser.add_argument("--with-voice", action="store_true", help="Install optional Python hotkey/transcription daemon")
+    parser.add_argument("--with-voice", action="store_true", help="Install legacy headless Python voice (instead of native overlay)")
+    parser.add_argument("--with-native", action="store_true", help="Install v2 native AppKit menu-bar overlay")
     args = parser.parse_args()
     if sys.platform != "darwin":
         print("LaunchAgents only work on macOS.", file=sys.stderr)
@@ -162,7 +202,7 @@ def main() -> int:
         return 2
     try:
         if args.command == "install":
-            install(args.with_voice)
+            install(args.with_voice, args.with_native)
         elif args.command == "uninstall":
             uninstall()
         else:

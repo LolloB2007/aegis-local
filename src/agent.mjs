@@ -6,6 +6,7 @@ import { explicitIntegrationIntent, PLANNED_ACTIONS, MUTATING_ACTIONS, validateI
 import { planIntegration } from './tool-planner.mjs';
 import { stageApproval, takeApproval, cancelApproval } from './approvals.mjs';
 import { desktopIntent, DESKTOP_PLANNED, DESKTOP_MUTATIONS, DESKTOP_READ, validateDesktopArgs, executeDesktop, previewDesktop } from './desktop-tools.mjs';
+import { briefingIntent, runBriefing } from './briefing.mjs';
 
 const SIDE_EFFECTS = new Set(['open_app', 'open_website', 'web_search', 'find_files', 'create_note', 'list_notes']);
 const EXECUTABLE = new Set([...SIDE_EFFECTS, 'get_time', 'help']);
@@ -29,6 +30,9 @@ function routeSafe(text, classification, threshold) {
 export async function runTurn(input, hooks = {}) {
   const text = String(input || '').trim();
   if (!text || text.length > 12000) throw new Error('Enter a request between 1 and 12,000 characters.');
+  const signal = hooks.signal || null;
+  const ensureActive = () => { if (signal?.aborted) throw new Error('Request cancelled'); };
+  ensureActive();
   const settings = await getSettings();
   const past = await getHistory();
   const history = [...past, { role: 'user', content: text, at: new Date().toISOString() }];
@@ -41,6 +45,7 @@ export async function runTurn(input, hooks = {}) {
   // Confirmation commands are deliberately not interpreted by an LLM.
   const approvalCommand = /^(confirm|cancel)\s+([a-f0-9]{12})$/i.exec(text);
   if (approvalCommand) {
+    ensureActive();
     const [,verb,token] = approvalCommand;
     let output, action;
     if (verb.toLowerCase() === 'cancel') {
@@ -55,6 +60,7 @@ export async function runTurn(input, hooks = {}) {
       } else {
         const isDesktop = DESKTOP_MUTATIONS.has(pending.tool);
         const safeArgs = isDesktop ? validateDesktopArgs(pending.tool, pending.args) : validateIntegrationArgs(pending.tool, pending.args, settings);
+        ensureActive();
         output = isDesktop ? await executeDesktop(pending.tool, safeArgs, settings) : await executeIntegration(pending.tool, safeArgs, settings);
         action = pending.tool;
         emit('Human-confirmed action executed');
@@ -78,18 +84,25 @@ export async function runTurn(input, hooks = {}) {
     emit(`Kev unavailable: ${e.message}`, 'warning');
   }
 
+  ensureActive();
   // New tools require a user-command grammar match, never Kev's guess alone.
   const integrationIntent = explicitIntegrationIntent(text) || desktopIntent(text);
   const desktop = Boolean(integrationIntent && (DESKTOP_READ.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent)));
   const needsPlanning = integrationIntent && (PLANNED_ACTIONS.has(integrationIntent) || DESKTOP_PLANNED.has(integrationIntent));
-  const route = integrationIntent
+  const brief = briefingIntent(text);
+  const route = brief ? {intent:'daily_briefing',reason:'Explicit read-only daily workflow',source:'Command guardrail'} : integrationIntent
     ? { intent:integrationIntent, reason:'Explicit integration command verified', source:classification?'Kev + guardrail':'Command fallback' }
     : routeSafe(text, classification, settings.confidenceThreshold);
   let output;
   let model = settings.kevModel;
   let modelMeta = null;
 
-  if (integrationIntent) {
+  if (brief) {
+    model = settings.llmModel;
+    const result = await runBriefing(settings,{emit,onDelta:hooks.onDelta,signal});
+    ensureActive();
+    output = result;
+  } else if (integrationIntent) {
     model = needsPlanning ? settings.llmModel : 'local';
     let rawArgs = {};
     if (needsPlanning) {
@@ -105,13 +118,14 @@ export async function runTurn(input, hooks = {}) {
         rawArgs = await planIntegration(settings, integrationIntent, text);
         emit('Text model extracted structured parameters (not executable commands)');
       } finally {
-        if (settings.autoReloadKev) {
+        if (settings.autoReloadKev && !signal?.aborted) {
           try { await warmKev(settings); emit('Re-loaded Kev after tool planning'); }
           catch (e) { emit(`Kev re-load failed: ${e.message}`, 'warning'); }
         }
       }
     }
     try {
+      ensureActive();
       let args = desktop
         ? validateDesktopArgs(integrationIntent, rawArgs)
         : validateIntegrationArgs(integrationIntent, rawArgs, settings);
@@ -124,6 +138,7 @@ export async function runTurn(input, hooks = {}) {
         } else {
           summary = confirmationSummary(integrationIntent, args);
         }
+        ensureActive();
         const token = stageApproval(integrationIntent, args, summary);
         output = {
           text: `**Confirmation required**\n${summary}\n\nReply \`confirm ${token}\` to execute or \`cancel ${token}\` to discard. Expires in 5 minutes.`,
@@ -131,6 +146,7 @@ export async function runTurn(input, hooks = {}) {
         };
         emit('Awaiting human confirmation before changing macOS state');
       } else {
+        ensureActive();
         output = desktop
           ? await executeDesktop(integrationIntent, args, settings)
           : await executeIntegration(integrationIntent, args, settings);
@@ -156,7 +172,8 @@ export async function runTurn(input, hooks = {}) {
       }
     }
     try {
-      const result = await generate(settings, history);
+      const result = await generate(settings, history, {onDelta:hooks.onDelta,signal});
+      ensureActive();
       output = { text: result.content };
       modelMeta = { durationMs: result.durationMs, tokens: result.tokens, loadMs: result.loadMs };
       emit(`Generated with ${settings.llmModel}`);
@@ -164,7 +181,7 @@ export async function runTurn(input, hooks = {}) {
       const note = !classifiedError ? '' : ' Kev was also unavailable.';
       throw new Error(`${e.message}${note} Confirm the LLM tag in Settings and run ollama pull <model>.`);
     } finally {
-      if (settings.autoReloadKev) {
+      if (settings.autoReloadKev && !signal?.aborted) {
         try { await warmKev(settings); emit('Re-loaded Kev for the next command'); }
         catch (e) { emit(`Kev re-load failed: ${e.message}`, 'warning'); }
       }
@@ -190,6 +207,7 @@ export async function runTurn(input, hooks = {}) {
     emit(`${route.intent} executed locally${output.needsInput ? ' (needs clarification)' : ''}`);
   }
 
+  ensureActive();
   const assistant = { role: 'assistant', content: output.text, at: new Date().toISOString(), action: route.intent, model };
   await saveHistory([...history, assistant]);
   return {
