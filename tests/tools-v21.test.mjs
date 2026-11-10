@@ -65,6 +65,24 @@ test('Indexed text excludes Aegis memory, searches documents and never edits the
  assert.equal(await fs.readFile(path.join(dir,'Reports','valuation.md'),'utf8'),original);
 });
 
+test('legacy note tool cannot write to the protected personal vault or Aegis memory',async()=>{
+ const {createNote}=await import('../src/tools.mjs');
+ const settings=await getSettings();
+ for(const notesFolder of [settings.vaultRoot,settings.memoryRoot]){
+   const configured={...settings,notesFolder};
+   await assert.rejects(()=>createNote('save a note: Unsafe | Should not be saved',configured),
+     /Protected Obsidian folders/);
+ }
+ const personal=path.join(home,'Documents','Obsidian','claude');
+ const unauthorized=path.join(personal,'new-directory');
+ await assert.rejects(
+   ()=>createNote('save a note: No | Should not create folders',{...settings,notesFolder:unauthorized}),
+   /Protected Obsidian folders/
+ );
+ await assert.rejects(()=>fs.stat(unauthorized),e=>e.code==='ENOENT');
+ assert.ok(!(await fs.readdir(personal)).includes('Unsafe.md'));
+});
+
 test('Developer tool only inspects a specified local repository without arbitrary commands',async t=>{
  const dir=path.join(home,'Projects','sample');
  await fs.mkdir(dir,{recursive:true});

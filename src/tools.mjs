@@ -47,9 +47,42 @@ export async function createNote(text, settings) {
   if (!note) return { text: 'Try `remember that the meeting is at 4` or `save a note: Title | Note content`.', needsInput: true };
   const dir = expandHome(settings.notesFolder);
   if (!inUserHome(dir)) throw new Error('Notes folder is outside your home directory.');
+  // Resolve as far as the filesystem exists BEFORE mkdir. Otherwise a
+  // configured notesFolder under the private vault could create directories
+  // there even though writing the note was subsequently denied.
+  let probe = path.resolve(dir), destination = null;
+  for (;;) {
+    try {
+      const actual = await fs.realpath(probe);
+      destination = path.resolve(actual, path.relative(probe, dir));
+      break;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const parent = path.dirname(probe);
+      if (parent === probe) throw new Error('Unable to resolve notes directory.');
+      probe = parent;
+    }
+  }
+  const protectedDirs = [];
+  for (const configured of [settings.vaultRoot, settings.memoryRoot]) {
+    const original = path.resolve(expandHome(configured));
+    const real = await fs.realpath(original).catch(e => {
+      if (e.code === 'ENOENT') return original;
+      throw e;
+    });
+    protectedDirs.push(original,real);
+  }
+  if (protectedDirs.some(root => [dir,destination].some(candidate =>
+       candidate === root || candidate.startsWith(root + path.sep)))) {
+    throw new Error('Protected Obsidian folders require dedicated, approved Aegis tools.');
+  }
   await fs.mkdir(dir, { recursive: true });
   const actualDir = await fs.realpath(dir);
   if (!inUserHome(actualDir)) throw new Error('Notes directory points outside your home.');
+  if (protectedDirs.some(root =>
+        actualDir === root || actualDir.startsWith(root + path.sep))) {
+    throw new Error('Protected Obsidian folders require dedicated, approved Aegis tools.');
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const name = `${stamp} ${safeBasename(note.title)}.md`;
   const file = path.join(actualDir, name);
