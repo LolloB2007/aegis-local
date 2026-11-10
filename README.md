@@ -4,6 +4,17 @@ Local-first macOS assistant for an M1 MacBook Air with **8 GB RAM**. **No Electr
 
 > **Release-candidate status:** The native panel, global hotkeys, microphone access, Accessibility permissions, fullscreen Spaces, and LaunchAgent startup must be verified on the target Mac. Passing CI does not prove fullscreen or microphone behavior. See [RC verification checklist](docs/RELEASE_CANDIDATE_CHECKLIST.md).
 
+## Verified stock quotes (read-only)
+
+Ask `What's Apple's stock price?`, `What is the price of NVDA?`, or
+`How much is UniCredit stock worth?`. Kev still classifies intent, but a
+deterministic HTTPS read of Yahoo Finance chart metadata obtains the numeric
+price, currency, market timestamp, and source. The 3B cannot hallucinate a
+price or claim it searched the web. Quotes may be delayed; unknown companies
+require an explicit ticker, and provider failures are reported rather than
+guessed. Generic `search the web for ...` still opens a browser and does
+not feed its page contents into the LLM.
+
 ## v2.2 RC: macOS integrations, vault access gate, 3B context compaction
 
 - **WhatsApp** and **Opera GX** are added to the fixed app-launch/quit allowlist. Aegis does not send WhatsApp messages or read WhatsApp conversations.
