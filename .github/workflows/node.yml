@@ -5,6 +5,7 @@ on:
     branches: [main, "feat/**"]
 permissions:
   contents: read
+  pull-requests: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,7 +18,19 @@ jobs:
         run: |
           find src -type f \( -name '*.mjs' -o -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n1 node --check
       - name: Run offline unit/integration tests with mocked Ollama
-        run: npm test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if npm test > unit-report.txt 2>&1; then
+            cat unit-report.txt
+          else
+            cat unit-report.txt
+            if [ "${{ github.event_name }}" = "push" ]; then
+              { echo 'Aegis v2.1 test diagnostic (temporary):'; echo '~~~'; tail -n 180 unit-report.txt; echo '~~~'; } > diagnostic.md
+              gh pr comment 5 --body-file diagnostic.md || true
+            fi
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
