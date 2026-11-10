@@ -230,8 +230,8 @@ export async function runTurn(input, hooks = {}) {
           : { text: `Which app? I can open: ${Object.values(APP_CHOICES).join(', ')}.`, needsInput: true };
         break;
       }
-      case 'open_website': output = extractUrl(text) ? await openWebsite(text) : { text: 'Specify a URL to open.', needsInput: true }; break;
-      case 'web_search': output = await webSearch(text); break;
+      case 'open_website': output = extractUrl(text) ? await openWebsite(text,settings) : { text: 'Specify a URL to open.', needsInput: true }; break;
+      case 'web_search': output = await webSearch(text,settings); break;
       case 'find_files': output = await findFiles(text, settings); break;
       case 'create_note': output = await createNote(text, settings); break;
       case 'list_notes': output = await listNotes(settings); break;

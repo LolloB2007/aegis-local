@@ -15,6 +15,7 @@ const close=s=>new Promise(resolve=>s.close(resolve));
 test('tomorrow briefing reads real open checkboxes, never edits the personal vault',async t=>{
  const vault=path.join(home,'Documents','Obsidian','claude');
  await fs.mkdir(vault,{recursive:true});
+ await fs.writeFile(path.join(vault,'_Aegis.md'),"---\naegis-access: read-only\n---\n# Aegis Operating Manual — Read-Only Vault Access\nNever write.\n");
  const filename=path.join(vault,'Tasks.md');
  const note='# Pending\n- [ ] Review internship tracker\n- [x] Completed old task\n';
  await fs.writeFile(filename,note);

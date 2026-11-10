@@ -16,6 +16,7 @@ jobs:
       - name: Syntax-check core and voice
         run: |
           find src -type f \( -name '*.mjs' -o -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n1 node --check
+          find tests -type f -name '*.test.mjs' -print0 | xargs -0 -n1 node --check
       - name: Run offline unit/integration tests with mocked Ollama
         run: npm test
       - uses: actions/setup-python@v5

@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {expandHome,inUserHome} from './store.mjs';
+import {requireVaultPolicy} from './vault-policy.mjs';
 
 export function vaultNavigationIntent(raw) {
   const s=String(raw||'').trim();let m;
@@ -23,11 +24,7 @@ export function validateVaultNavigationArgs(intent,p) {
   return {path:value.trim()};
 }
 async function getVault(settings) {
-  const configured=path.resolve(expandHome(settings.vaultRoot));
-  if(!inUserHome(configured))throw new Error('Vault outside home.');
-  const root=await fs.realpath(configured);
-  if(!inUserHome(root))throw new Error('Vault resolves outside home.');
-  return root;
+  return (await requireVaultPolicy(settings)).root;
 }
 async function allMarkdown(root) {
   const files=[];const until=Date.now()+5000;
