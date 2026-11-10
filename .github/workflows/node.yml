@@ -1,4 +1,4 @@
-name: Node tests and syntax checks
+name: Node and Python tests, syntax and safety checks
 on:
   pull_request:
   push:
@@ -18,3 +18,10 @@ jobs:
           find src -type f \( -name '*.mjs' -o -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n1 node --check
       - name: Run offline unit/integration tests with mocked Ollama
         run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python daemon and installer
+        run: python -m py_compile src/ui/voice-control/headless_voice.py scripts/install-launchagents.py scripts/test_launchagents.py
+      - name: Test LaunchAgent plist and headless imports
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v

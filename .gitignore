@@ -25,3 +25,8 @@ Library/Logs/
 
 # Environment
 .env
+
+# Optional Python voice environment / runtime caches
+.venv/
+__pycache__/
+*.pyc

@@ -3,7 +3,10 @@ export const APP_CHOICES = Object.freeze({
   safari: 'Safari', finder: 'Finder', notes: 'Notes', calendar: 'Calendar',
   reminders: 'Reminders', mail: 'Mail', music: 'Music', photos: 'Photos',
   terminal: 'Terminal', vscode: 'Visual Studio Code', obsidian: 'Obsidian',
-  chrome: 'Google Chrome', settings: 'System Settings', preview: 'Preview'
+  chrome: 'Google Chrome', settings: 'System Settings', preview: 'Preview',
+  slack: 'Slack', outlook: 'Microsoft Outlook', spotify: 'Spotify',
+  discord: 'Discord', zoom: 'zoom.us', teams: 'Microsoft Teams',
+  iterm: 'iTerm', activity_monitor: 'Activity Monitor'
 });
 
 export function detectApp(text) {
@@ -12,6 +15,11 @@ export function detectApp(text) {
     ['vscode', /\b(vs\s*code|visual studio code|code editor)\b/],
     ['chrome', /\b(chrome|google chrome)\b/],
     ['settings', /\b(system settings|system preferences)\b/],
+    ['outlook', /\b(microsoft outlook|outlook)\b/],
+    ['slack', /\bslack\b/], ['spotify', /\bspotify\b/],
+    ['discord', /\bdiscord\b/], ['zoom', /\bzoom(?:\.us)?\b/],
+    ['teams', /\b(microsoft teams|teams)\b/], ['iterm', /\biterm2?\b/],
+    ['activity_monitor', /\bactivity monitor\b/],
     ['safari', /\bsafari\b/], ['finder', /\bfinder\b/],
     ['calendar', /\bcalendar\b/], ['reminders', /\breminders?\b/],
     ['terminal', /\bterminal\b/], ['obsidian', /\bobsidian\b/],
